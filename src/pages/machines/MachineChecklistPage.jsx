@@ -36,14 +36,22 @@ export default function MachineChecklistPage() {
         machineApi.getAll(),
       ]);
 
-      if (checklistRes.status === 'fulfilled') {
-        const data = checklistRes.value.data.data || checklistRes.value.data || [];
-        setMachines(Array.isArray(data) ? data : []);
-      }
-      if (allRes.status === 'fulfilled') {
-        const data = allRes.value.data.data || allRes.value.data || [];
-        setAllMachineDetails(Array.isArray(data) ? data : []);
-      }
+      const checklistData = checklistRes.status === 'fulfilled'
+        ? (checklistRes.value.data.data || checklistRes.value.data || [])
+        : [];
+      const allData = allRes.status === 'fulfilled'
+        ? (allRes.value.data.data || allRes.value.data || [])
+        : [];
+
+      const allArr = Array.isArray(allData) ? allData : [];
+      setAllMachineDetails(allArr);
+
+      // Merge allMachines data (machine_image, ingest_path, current_run) into each checklist item
+      const merged = (Array.isArray(checklistData) ? checklistData : []).map((m) => {
+        const detail = allArr.find((d) => d.machine_id === m.machine_id);
+        return detail ? { ...detail, ...m } : m;
+      });
+      setMachines(merged);
     } catch (err) {
       toast.error(getErrorMessage(err));
     } finally {
@@ -169,9 +177,24 @@ export default function MachineChecklistPage() {
       ) : (
         <div className="checklist-grid">
           {filteredMachines.map((machine) => {
-            // Look up ingest_path for display
+            // Resolve display values — ChecklistPage merges allMachineDetails into machines,
+            // so machine already has machine_image, ingest_path and current_run.
             const fullMachine = allMachineDetails.find((m) => m.machine_id === machine.machine_id);
-            const ingestPath = fullMachine?.ingest_path || machine.ingest_path || 'N/A';
+            const ingestPath = machine.ingest_path || fullMachine?.ingest_path || 'N/A';
+
+            // Image: field is machine_image (byte array from API)
+            const rawImage = machine.machine_image ?? fullMachine?.machine_image;
+
+            // Production & rejection counts
+            const run = machine.current_run ?? fullMachine?.current_run;
+            const productionCount =
+              run?.total_count ??
+              machine.production_count ??
+              fullMachine?.production_count ??
+              0;
+            const rejectionCount =
+              run?.rejected_count ??
+              Number(machine.total_rejected ?? fullMachine?.total_rejected ?? machine.rejection_count ?? 0);
 
             return (
               <div key={machine.machine_id} className="checklist-card card">
@@ -204,9 +227,9 @@ export default function MachineChecklistPage() {
                   justifyContent: 'center',
                   border: '1px solid var(--color-border)',
                 }}>
-                  {(fullMachine?.image || machine.image) ? (
+                  {rawImage ? (
                     <img
-                      src={bufferToImageUrl(fullMachine?.image || machine.image)}
+                      src={bufferToImageUrl(rawImage)}
                       alt={machine.machine_name}
                       style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                       onError={(e) => {
@@ -216,7 +239,7 @@ export default function MachineChecklistPage() {
                     />
                   ) : null}
                   <div style={{
-                    display: (fullMachine?.image || machine.image) ? 'none' : 'flex',
+                    display: rawImage ? 'none' : 'flex',
                     flexDirection: 'column',
                     alignItems: 'center',
                     gap: 'var(--space-2)',
@@ -231,12 +254,12 @@ export default function MachineChecklistPage() {
                 <div className="checklist-stats">
                   <div className="checklist-stat">
                     <span className="checklist-stat-label">Production</span>
-                    <span className="checklist-stat-value">{machine.production_count || 0}</span>
+                    <span className="checklist-stat-value">{productionCount}</span>
                   </div>
                   <div className="checklist-stat">
                     <span className="checklist-stat-label">Rejections</span>
-                    <span className="checklist-stat-value" style={{ color: (machine.rejection_count || 0) > 0 ? 'var(--color-danger)' : undefined }}>
-                      {machine.rejection_count || 0}
+                    <span className="checklist-stat-value" style={{ color: rejectionCount > 0 ? 'var(--color-danger)' : undefined }}>
+                      {rejectionCount}
                     </span>
                   </div>
                   <div className="checklist-stat" style={{ marginLeft: 'auto' }}>

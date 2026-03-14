@@ -133,27 +133,69 @@ export function getErrorMessage(error) {
 }
 
 /**
- * Convert MySQL Buffer/Array to base64 image URL
+ * Convert MySQL Buffer/Array/base64 to a usable image URL
+ * Handles:
+ *   - Already a data URI or http URL (pass-through)
+ *   - Node.js Buffer serialised as { type: 'Buffer', data: [...] }
+ *   - Plain JS arrays of byte numbers
+ *   - Uint8Array / ArrayBuffer instances
+ *   - Objects whose own keys are numeric strings (JSON-serialised Buffer)
  */
 export function bufferToImageUrl(imageBuffer) {
   if (!imageBuffer) return null;
-  
-  // If it's already a base64 string or URL, return it
-  if (typeof imageBuffer === 'string' && (imageBuffer.startsWith('data:') || imageBuffer.startsWith('http'))) {
-    return imageBuffer;
+
+  // Already a usable URL or data URI
+  if (typeof imageBuffer === 'string') {
+    if (imageBuffer.startsWith('data:') || imageBuffer.startsWith('http')) {
+      return imageBuffer;
+    }
+    // Bare base64 string without prefix
+    try {
+      return `data:image/jpeg;base64,${imageBuffer}`;
+    } catch {
+      return null;
+    }
   }
 
   try {
-    const data = imageBuffer.data ? imageBuffer.data : imageBuffer;
-    if (!Array.isArray(data) && !(data instanceof Uint8Array)) return null;
+    let bytes;
 
-    const base64 = btoa(
-      new Uint8Array(data).reduce(
-        (data, byte) => data + String.fromCharCode(byte),
-        ''
-      )
-    );
-    return `data:image/jpeg;base64,${base64}`;
+    if (imageBuffer instanceof Uint8Array || imageBuffer instanceof ArrayBuffer) {
+      // Native typed array
+      bytes = new Uint8Array(
+        imageBuffer instanceof ArrayBuffer ? imageBuffer : imageBuffer.buffer
+      );
+    } else if (Array.isArray(imageBuffer)) {
+      // Plain JS array of byte numbers
+      bytes = new Uint8Array(imageBuffer);
+    } else if (imageBuffer && typeof imageBuffer === 'object') {
+      // { type: 'Buffer', data: [...] } — Node.js Buffer JSON form
+      const inner = imageBuffer.data ?? imageBuffer;
+      if (Array.isArray(inner)) {
+        bytes = new Uint8Array(inner);
+      } else {
+        // Object with numeric string keys: { '0': 255, '1': 216, ... }
+        const keys = Object.keys(inner).filter((k) => !isNaN(Number(k))).sort((a, b) => Number(a) - Number(b));
+        if (keys.length === 0) return null;
+        bytes = new Uint8Array(keys.map((k) => inner[k]));
+      }
+    } else {
+      return null;
+    }
+
+    // Detect image type from magic bytes for a correct MIME type
+    let mimeType = 'image/jpeg';
+    if (bytes[0] === 0x89 && bytes[1] === 0x50) mimeType = 'image/png';
+    else if (bytes[0] === 0x47 && bytes[1] === 0x49) mimeType = 'image/gif';
+    else if (bytes[0] === 0x52 && bytes[1] === 0x49) mimeType = 'image/webp';
+
+    // Convert bytes → base64 in chunks to avoid call-stack overflow on large images
+    let binary = '';
+    const chunkSize = 8192;
+    for (let i = 0; i < bytes.length; i += chunkSize) {
+      binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
+    }
+    return `data:${mimeType};base64,${btoa(binary)}`;
   } catch (err) {
     console.error('Error converting image buffer:', err);
     return null;

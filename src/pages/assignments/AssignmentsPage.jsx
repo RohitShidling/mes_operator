@@ -6,8 +6,8 @@ import StatusBadge from '../../components/common/StatusBadge';
 import LoadingSpinner from '../../components/common/LoadingSpinner';
 import EmptyState from '../../components/common/EmptyState';
 import ConfirmModal from '../../components/common/ConfirmModal';
-import { getErrorMessage, formatDateTime } from '../../utils/helpers';
-import { Users, Plus, X, Link2, Unlink, RefreshCw, Monitor } from 'lucide-react';
+import { getErrorMessage, formatDateTime, bufferToImageUrl } from '../../utils/helpers';
+import { Users, Plus, X, Link2, Unlink, RefreshCw, Monitor, Image as ImageIcon } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 export default function AssignmentsPage() {
@@ -121,59 +121,134 @@ export default function AssignmentsPage() {
           />
         ) : (
           <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))' }}>
-            {myMachines.map((m, idx) => (
-              <div key={m.machine_id || idx} className="card" style={{
-                background: 'var(--color-bg-tertiary)',
-                display: 'flex',
-                flexDirection: 'column',
-                gap: 'var(--space-3)',
-              }}>
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
+            {myMachines.map((m, idx) => {
+              // Merge extra details (machine_image, current_run) from the all-machines list
+              const detail = machines.find((d) => d.machine_id === m.machine_id);
+              const merged = detail ? { ...detail, ...m } : m;
+
+              const rawImage = merged.machine_image ?? detail?.machine_image;
+              const imgSrc = bufferToImageUrl(rawImage);
+
+              const run = merged.current_run ?? detail?.current_run;
+              const productionCount = run?.total_count ?? merged.production_count ?? 0;
+              const rejectionCount =
+                run?.rejected_count ??
+                Number(merged.total_rejected ?? merged.rejection_count ?? 0);
+
+              return (
+                <div key={m.machine_id || idx} className="card" style={{
+                  background: 'var(--color-bg-tertiary)',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 'var(--space-3)',
+                }}>
+                  {/* Header */}
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <div style={{
+                        width: 40,
+                        height: 40,
+                        borderRadius: 'var(--radius-md)',
+                        background: 'var(--color-accent-primary-glow)',
+                        color: 'var(--color-accent-primary)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                      }}>
+                        <Monitor size={20} />
+                      </div>
+                      <div>
+                        <div style={{ fontWeight: 700, color: 'var(--color-text-primary)' }}>{m.machine_name}</div>
+                        <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)' }}>{m.machine_id}</div>
+                      </div>
+                    </div>
+                    <StatusBadge status={m.status} />
+                  </div>
+
+                  {/* Machine Image */}
+                  <div style={{
+                    width: '100%',
+                    height: '140px',
+                    borderRadius: 'var(--radius-md)',
+                    background: 'var(--color-bg-secondary)',
+                    overflow: 'hidden',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    border: '1px solid var(--color-border)',
+                  }}>
+                    {imgSrc ? (
+                      <img
+                        src={imgSrc}
+                        alt={m.machine_name}
+                        style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                        onError={(e) => {
+                          e.target.style.display = 'none';
+                          e.target.nextSibling.style.display = 'flex';
+                        }}
+                      />
+                    ) : null}
                     <div style={{
-                      width: 40,
-                      height: 40,
-                      borderRadius: 'var(--radius-md)',
-                      background: 'var(--color-accent-primary-glow)',
-                      color: 'var(--color-accent-primary)',
-                      display: 'flex',
+                      display: imgSrc ? 'none' : 'flex',
+                      flexDirection: 'column',
                       alignItems: 'center',
-                      justifyContent: 'center',
+                      gap: 'var(--space-2)',
+                      color: 'var(--color-text-muted)',
                     }}>
-                      <Monitor size={20} />
+                      <ImageIcon size={28} opacity={0.45} />
+                      <span style={{ fontSize: 'var(--font-size-xs)' }}>No Image</span>
+                    </div>
+                  </div>
+
+                  {/* Production & Rejections */}
+                  <div style={{
+                    display: 'flex',
+                    gap: 'var(--space-4)',
+                    padding: 'var(--space-2) 0',
+                    borderTop: '1px solid var(--color-border)',
+                    borderBottom: '1px solid var(--color-border)',
+                  }}>
+                    <div>
+                      <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)' }}>Production</div>
+                      <div style={{ fontWeight: 700, fontSize: 'var(--font-size-lg)', color: 'var(--color-text-primary)' }}>{productionCount}</div>
                     </div>
                     <div>
-                      <div style={{ fontWeight: 700, color: 'var(--color-text-primary)' }}>{m.machine_name}</div>
-                      <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)' }}>{m.machine_id}</div>
+                      <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)' }}>Rejections</div>
+                      <div style={{
+                        fontWeight: 700,
+                        fontSize: 'var(--font-size-lg)',
+                        color: rejectionCount > 0 ? 'var(--color-danger)' : 'var(--color-text-primary)',
+                      }}>{rejectionCount}</div>
                     </div>
                   </div>
-                  <StatusBadge status={m.status} />
-                </div>
-                {m.mentor_name && (
-                  <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)' }}>
-                    Mentor: <span style={{ color: 'var(--color-text-secondary)' }}>{m.mentor_name}</span>
+
+                  {m.mentor_name && (
+                    <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)' }}>
+                      Mentor: <span style={{ color: 'var(--color-text-secondary)' }}>{m.mentor_name}</span>
+                    </div>
+                  )}
+
+                  <div className="flex items-center gap-2">
+                    <button
+                      className="btn btn-ghost btn-sm"
+                      style={{ flex: 1 }}
+                      onClick={() => navigate(`/machines/${m.machine_id}`)}
+                    >
+                      View
+                    </button>
+                    <button
+                      className="btn btn-danger btn-sm"
+                      onClick={() => {
+                        setSelectedMachineId(m.machine_id);
+                        setShowUnassignModal(true);
+                      }}
+                    >
+                      <Unlink size={14} />
+                    </button>
                   </div>
-                )}
-                <div className="flex items-center gap-2">
-                  <button
-                    className="btn btn-ghost btn-sm"
-                    style={{ flex: 1 }}
-                    onClick={() => navigate(`/machines/${m.machine_id}`)}
-                  >
-                    View Details
-                  </button>
-                  <button
-                    className="btn btn-danger btn-sm"
-                    onClick={() => {
-                      setSelectedMachineId(m.machine_id);
-                      setShowUnassignModal(true);
-                    }}
-                  >
-                    <Unlink size={14} />
-                  </button>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>
