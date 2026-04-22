@@ -22,7 +22,18 @@ export default function WorkOrdersPage() {
     try {
       const res = await workOrderApi.getAll();
       const data = res.data.data || res.data || [];
-      setWorkOrders(Array.isArray(data) ? data : []);
+      const woList = Array.isArray(data) ? data : [];
+      
+      const detailedWoList = await Promise.all(woList.map(async (wo) => {
+        try {
+          const detailRes = await workOrderApi.getById(wo.work_order_id);
+          const detailData = detailRes.data.data || detailRes.data;
+          return { ...wo, ...detailData };
+        } catch (e) {
+          return wo;
+        }
+      }));
+      setWorkOrders(detailedWoList);
     } catch (err) {
       toast.error(getErrorMessage(err));
     } finally {
@@ -133,28 +144,41 @@ export default function WorkOrdersPage() {
                   </p>
                 )}
 
-                <div className="flex items-center justify-between mb-4">
-                  <div className="flex items-center gap-2">
-                    <Target size={14} style={{ color: 'var(--color-accent-primary)' }} />
-                    <span style={{ fontSize: 'var(--font-size-sm)', color: 'var(--color-text-secondary)' }}>
-                      Target: <strong style={{ color: 'var(--color-text-primary)' }}>{wo.target}</strong>
-                    </span>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 'var(--space-2)', marginBottom: 'var(--space-3)' }}>
+                  <div style={{ padding: 'var(--space-2)', background: 'var(--color-bg-tertiary)', borderRadius: 'var(--radius-md)' }}>
+                    <div style={{ fontSize: '11px', color: 'var(--color-text-muted)', marginBottom: '2px' }}>Target</div>
+                    <div style={{ fontWeight: 600, color: 'var(--color-text-primary)' }}>{wo.target}</div>
                   </div>
-                  <span style={{ fontSize: 'var(--font-size-sm)', fontWeight: 700, color: 'var(--color-accent-primary)' }}>
-                    {progress}%
-                  </span>
+                  <div style={{ padding: 'var(--space-2)', background: 'var(--color-bg-tertiary)', borderRadius: 'var(--radius-md)' }}>
+                    <div style={{ fontSize: '11px', color: 'var(--color-text-muted)', marginBottom: '2px' }}>Produced</div>
+                    <div style={{ fontWeight: 600, color: 'var(--color-success)' }}>{wo.total_produced || wo.produced_count || 0}</div>
+                  </div>
+                  <div style={{ padding: 'var(--space-2)', background: 'var(--color-bg-tertiary)', borderRadius: 'var(--radius-md)' }}>
+                    <div style={{ fontSize: '11px', color: 'var(--color-text-muted)', marginBottom: '2px' }}>Rejected</div>
+                    <div style={{ fontWeight: 600, color: Number(totalRej) > 0 ? 'var(--color-danger)' : 'var(--color-text-primary)' }}>{totalRej}</div>
+                  </div>
                 </div>
 
+                <div className="flex items-center justify-between mb-2">
+                   <span style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)' }}>Progress</span>
+                   <span style={{ fontSize: 'var(--font-size-sm)', fontWeight: 700, color: 'var(--color-accent-primary)' }}>
+                    {progress}%
+                   </span>
+                </div>
                 <div className="progress-bar">
                   <div className="progress-fill" style={{ width: `${progress}%` }} />
                 </div>
 
                 <div className="flex items-center justify-between mt-4" style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)' }}>
-                  <span>Created: {formatDate(wo.created_at)}</span>
-                  <div className="flex items-center gap-3">
-                    {totalRej > 0 && (
-                      <span style={{ color: 'var(--color-danger)', fontWeight: 600 }}>Rejected: {totalRej}</span>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                    <span>Created: {formatDate(wo.created_at)}</span>
+                    {wo.targeted_end_date && (
+                      <span style={{ color: 'var(--color-warning)', fontWeight: 500 }}>
+                        Target End: {formatDate(wo.targeted_end_date)}
+                      </span>
                     )}
+                  </div>
+                  <div className="flex items-center gap-3">
                     <ArrowRight size={14} />
                   </div>
                 </div>

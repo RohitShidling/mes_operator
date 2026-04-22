@@ -5,10 +5,12 @@ import { machineApi } from '../../api/machineApi';
 import { operatorApi } from '../../api/operatorApi';
 import StatusBadge from '../../components/common/StatusBadge';
 import LoadingSpinner from '../../components/common/LoadingSpinner';
+import { workOrderApi } from '../../api/workOrderApi';
+import ConfirmModal from '../../components/common/ConfirmModal';
 import { getErrorMessage, formatDateTime, bufferToImageUrl } from '../../utils/helpers';
 import {
   ArrowLeft, Monitor, Activity, TrendingUp, Users, AlertTriangle, RefreshCw,
-  Play, Pause, Square, Zap, StopCircle, Image as ImageIcon,
+  Play, Pause, Square, Zap, StopCircle, Image as ImageIcon, Unlink, X
 } from 'lucide-react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import toast from 'react-hot-toast';
@@ -34,6 +36,21 @@ export default function MachineDetailPage() {
   const [updating, setUpdating] = useState(false);
   const [ingesting, setIngesting] = useState(false);
   const [stopping, setStopping] = useState(false);
+  const [showUnassignModal, setShowUnassignModal] = useState(false);
+  const [unassigning, setUnassigning] = useState(false);
+  const [allMachinesList, setAllMachinesList] = useState([]);
+  const [showRejectModal, setShowRejectModal] = useState(false);
+  const [reportingRejection, setReportingRejection] = useState(false);
+  const [rejectionForm, setRejectionForm] = useState({
+    machine_id: '',
+    work_order_id: '',
+    rejection_reason: '',
+    rework_reason: '',
+    part_description: '',
+    supervisor_name: '',
+    rejected_count: 1,
+    part_image: null,
+  });
 
   const fetchData = async () => {
     try {
@@ -56,6 +73,7 @@ export default function MachineDetailPage() {
         const allArr = Array.isArray(allData) ? allData : [];
         const found = allArr.find((m) => m.machine_id === machineId);
         setAllMachineData(found || null);
+        setAllMachinesList(allArr);
       }
 
       if (vizRes.status === 'fulfilled') {
@@ -150,6 +168,71 @@ export default function MachineDetailPage() {
       }
     } finally {
       setStopping(false);
+    }
+  };
+
+  const handleUnassignMachine = async () => {
+    const currentRun = allMachineData?.current_run || machine?.current_run;
+    const workOrderId = currentRun?.work_order_id || machine?.work_order_id;
+    
+    if (!workOrderId) return;
+    
+    setUnassigning(true);
+    try {
+      await workOrderApi.unassignMachine(workOrderId, machineId);
+      toast.success(`Machine unassigned from Work Order ${workOrderId}`);
+      setShowUnassignModal(false);
+      fetchData();
+    } catch (err) {
+      const errRes = err.response?.data;
+      if (errRes && errRes.statusCode === 404) {
+         toast.error(errRes.message || 'Machine is not assigned to this work order');
+      } else {
+         toast.error(getErrorMessage(err));
+      }
+    } finally {
+      setUnassigning(false);
+    }
+  };
+
+  const handleReportRejection = async (e) => {
+    e.preventDefault();
+    if (!rejectionForm.machine_id || !rejectionForm.rejection_reason) {
+      toast.error('Please fill in all required fields');
+      return;
+    }
+
+    setReportingRejection(true);
+    try {
+      const formData = new FormData();
+      formData.append('machine_id', rejectionForm.machine_id);
+      formData.append('rejection_reason', rejectionForm.rejection_reason);
+      formData.append('rejected_count', rejectionForm.rejected_count);
+      
+      if (rejectionForm.work_order_id) formData.append('work_order_id', rejectionForm.work_order_id);
+      if (rejectionForm.rework_reason) formData.append('rework_reason', rejectionForm.rework_reason);
+      if (rejectionForm.part_description) formData.append('part_description', rejectionForm.part_description);
+      if (rejectionForm.supervisor_name) formData.append('supervisor_name', rejectionForm.supervisor_name);
+      if (rejectionForm.part_image) formData.append('part_image', rejectionForm.part_image);
+
+      await operatorApi.reportRejection(formData);
+      toast.success('Rejection reported successfully');
+      setShowRejectModal(false);
+      setRejectionForm({
+        machine_id: machineId,
+        work_order_id: allMachineData?.current_run?.work_order_id || machine?.work_order_id || '',
+        rejection_reason: '',
+        rework_reason: '',
+        part_description: '',
+        supervisor_name: '',
+        rejected_count: 1,
+        part_image: null,
+      });
+      fetchData();
+    } catch (err) {
+      toast.error(getErrorMessage(err));
+    } finally {
+      setReportingRejection(false);
     }
   };
 
@@ -297,6 +380,19 @@ export default function MachineDetailPage() {
             <StopCircle size={14} />
             {stopping ? 'Stopping...' : 'Stop Machine'}
           </button>
+
+          {(allMachineData?.current_run?.work_order_id || machine?.current_run?.work_order_id || machine?.work_order_id) && (
+             <>
+                <div style={{ height: '28px', width: '1px', background: 'var(--color-border)' }} />
+                <button
+                  className="btn btn-warning btn-sm"
+                  onClick={() => setShowUnassignModal(true)}
+                >
+                  <Unlink size={14} />
+                  Unassign from Work Order
+                </button>
+             </>
+          )}
         </div>
       </div>
 
@@ -382,12 +478,28 @@ export default function MachineDetailPage() {
       </div>
 
       {/* Rejection History */}
-      {rejections.length > 0 && (
-        <div className="card mb-6">
-          <div className="card-header">
+      <div className="card mb-6">
+        <div className="card-header">
+          <div className="flex items-center gap-3">
             <h2 className="card-title">Rejection History</h2>
-            <span className="badge badge-danger">{rejectionCount} total rejected</span>
+            {rejectionCount > 0 && <span className="badge badge-danger">{rejectionCount} total rejected</span>}
           </div>
+          <button 
+            className="btn btn-danger btn-sm" 
+            onClick={() => {
+              setRejectionForm(p => ({
+                ...p, 
+                machine_id: machineId,
+                work_order_id: currentRun?.work_order_id || machine?.work_order_id || ''
+              }));
+              setShowRejectModal(true);
+            }}
+          >
+            <AlertTriangle size={14} /> Report Rejection
+          </button>
+        </div>
+        
+        {rejections.length > 0 ? (
           <div className="table-container">
             <table>
               <thead>
@@ -416,8 +528,10 @@ export default function MachineDetailPage() {
               </tbody>
             </table>
           </div>
-        </div>
-      )}
+        ) : (
+          <p style={{ color: 'var(--color-text-muted)', fontSize: 'var(--font-size-sm)' }}>No rejections reported yet</p>
+        )}
+      </div>
 
       {/* Operators & Breakdowns */}
       <div className="grid grid-2">
@@ -477,6 +591,137 @@ export default function MachineDetailPage() {
           )}
         </div>
       </div>
+
+      <ConfirmModal
+        isOpen={showUnassignModal}
+        onClose={() => setShowUnassignModal(false)}
+        onConfirm={handleUnassignMachine}
+        title="Unassign Machine"
+        message={`Are you sure you want to unassign this machine from Work Order ${allMachineData?.current_run?.work_order_id || machine?.current_run?.work_order_id || machine?.work_order_id}?`}
+        confirmText="Unassign"
+        variant="warning"
+        loading={unassigning}
+      />
+
+      {showRejectModal && (
+        <div className="modal-overlay" onClick={() => setShowRejectModal(false)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '500px' }}>
+            <div className="modal-header">
+              <h3 className="modal-title" style={{ color: 'var(--color-danger)' }}>Report Rejection</h3>
+              <button className="btn btn-ghost btn-icon" onClick={() => setShowRejectModal(false)}>
+                <X size={18} />
+              </button>
+            </div>
+            <form onSubmit={handleReportRejection} style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
+              
+              <div className="form-group">
+                <label htmlFor="rej-machine">Machine *</label>
+                <select
+                  id="rej-machine"
+                  value={rejectionForm.machine_id}
+                  onChange={(e) => setRejectionForm((p) => ({ ...p, machine_id: e.target.value }))}
+                  required
+                >
+                  <option value="">-- Select Machine --</option>
+                  {allMachinesList.map((m) => (
+                    <option key={m.machine_id} value={m.machine_id}>
+                      {m.machine_name} ({m.machine_id})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="form-group">
+                <label htmlFor="rej-wo">Work Order ID</label>
+                <input
+                  id="rej-wo"
+                  type="text"
+                  placeholder="Optional..."
+                  value={rejectionForm.work_order_id}
+                  onChange={(e) => setRejectionForm((p) => ({ ...p, work_order_id: e.target.value }))}
+                />
+              </div>
+
+              <div className="form-group">
+                <label htmlFor="rej-count">Rejected Quantity *</label>
+                <input
+                  id="rej-count"
+                  type="number"
+                  min="1"
+                  value={rejectionForm.rejected_count}
+                  onChange={(e) => setRejectionForm((p) => ({ ...p, rejected_count: parseInt(e.target.value) || 1 }))}
+                  required
+                />
+              </div>
+
+              <div className="form-group">
+                <label htmlFor="rej-reason">Rejection Reason *</label>
+                <textarea
+                  id="rej-reason"
+                  rows={2}
+                  placeholder="Why was it rejected?"
+                  value={rejectionForm.rejection_reason}
+                  onChange={(e) => setRejectionForm((p) => ({ ...p, rejection_reason: e.target.value }))}
+                  required
+                />
+              </div>
+
+              <div className="form-group">
+                <label htmlFor="rej-rework">Rework Reason</label>
+                <textarea
+                  id="rej-rework"
+                  rows={2}
+                  placeholder="Optional rework details..."
+                  value={rejectionForm.rework_reason}
+                  onChange={(e) => setRejectionForm((p) => ({ ...p, rework_reason: e.target.value }))}
+                />
+              </div>
+
+              <div className="form-group">
+                <label htmlFor="rej-part">Part Description</label>
+                <input
+                  id="rej-part"
+                  type="text"
+                  placeholder="Optional part description..."
+                  value={rejectionForm.part_description}
+                  onChange={(e) => setRejectionForm((p) => ({ ...p, part_description: e.target.value }))}
+                />
+              </div>
+
+              <div className="form-group">
+                <label htmlFor="rej-sup">Supervisor Name</label>
+                <input
+                  id="rej-sup"
+                  type="text"
+                  placeholder="Optional..."
+                  value={rejectionForm.supervisor_name}
+                  onChange={(e) => setRejectionForm((p) => ({ ...p, supervisor_name: e.target.value }))}
+                />
+              </div>
+
+              <div className="form-group">
+                <label htmlFor="rej-image">Evidence Image</label>
+                <input
+                  id="rej-image"
+                  type="file"
+                  accept="image/*"
+                  onChange={(e) => setRejectionForm((p) => ({ ...p, part_image: e.target.files[0] }))}
+                  style={{ padding: '8px', border: '1px dashed var(--color-border)', borderRadius: 'var(--radius-md)' }}
+                />
+              </div>
+
+              <div className="modal-footer" style={{ marginTop: 'var(--space-2)' }}>
+                <button type="button" className="btn btn-secondary" onClick={() => setShowRejectModal(false)}>
+                  Cancel
+                </button>
+                <button type="submit" className="btn btn-danger" disabled={reportingRejection}>
+                  {reportingRejection ? 'Submitting...' : 'Submit Rejection'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

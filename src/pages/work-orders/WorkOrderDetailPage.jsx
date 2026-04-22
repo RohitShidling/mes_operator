@@ -8,10 +8,10 @@ import { operatorApi } from '../../api/operatorApi';
 import StatusBadge from '../../components/common/StatusBadge';
 import LoadingSpinner from '../../components/common/LoadingSpinner';
 import ConfirmModal from '../../components/common/ConfirmModal';
-import { getErrorMessage, formatDateTime, calcPercentage, bufferToImageUrl } from '../../utils/helpers';
+import { getErrorMessage, formatDate, formatDateTime, calcPercentage, bufferToImageUrl } from '../../utils/helpers';
 import {
   ArrowLeft, Target, Hash, CheckCircle, Circle, PlayCircle, SkipForward, RefreshCw,
-  Plus, X, Search, Monitor, Trash2, Edit3, Save, AlertTriangle, Zap, Clock, Play, Pause, Image as ImageIcon
+  Plus, X, Search, Monitor, Trash2, Edit3, Save, AlertTriangle, Zap, Clock, Play, Pause, Image as ImageIcon, TrendingUp
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
@@ -41,6 +41,8 @@ export default function WorkOrderDetailPage() {
   const [showAssignModal, setShowAssignModal] = useState(false);
   const [machineSearch, setMachineSearch] = useState('');
   const [assigning, setAssigning] = useState(false);
+  const [selectedMachineToAssign, setSelectedMachineToAssign] = useState(null);
+  const [stageOrder, setStageOrder] = useState(1);
   const [showUnassignModal, setShowUnassignModal] = useState(false);
   const [unassignMachineId, setUnassignMachineId] = useState('');
   const [unassigning, setUnassigning] = useState(false);
@@ -112,9 +114,9 @@ export default function WorkOrderDetailPage() {
         } else if (Array.isArray(inner)) {
           r = inner;
         }
-        // Also store work_order data for total_rejected
-        if (inner?.work_order) {
-          setWorkOrder((prev) => prev ? { ...prev, total_rejected: inner.work_order.total_rejected, total_produced: inner.work_order.total_produced, total_accepted: inner.work_order.total_accepted } : prev);
+        // Also store work_order data for total_rejected if present
+        if (inner?.work_order && inner.work_order.total_rejected !== undefined) {
+          setWorkOrder((prev) => prev ? { ...prev, total_rejected: inner.work_order.total_rejected } : prev);
         }
         setRejections(r);
       }
@@ -181,16 +183,32 @@ export default function WorkOrderDetailPage() {
   };
 
   // --- Machine Assignment Handlers ---
-  const handleAssignMachine = async (machineId) => {
+  const handleAssignMachine = async (e) => {
+    e?.preventDefault();
+    if (!selectedMachineToAssign) return;
+
     setAssigning(true);
     try {
-      await workOrderApi.assignMachine(workOrderId, machineId);
+      await workOrderApi.assignMachine(workOrderId, selectedMachineToAssign.machine_id, stageOrder);
       toast.success('Machine assigned to work order!');
       setShowAssignModal(false);
+      setSelectedMachineToAssign(null);
+      setStageOrder(1);
       setMachineSearch('');
       fetchData();
     } catch (err) {
-      toast.error(getErrorMessage(err));
+      const errRes = err.response?.data;
+      if (errRes && errRes.statusCode === 409) {
+        const conflict = errRes.conflict;
+        toast.error(
+          `Conflict: Machine already assigned to "${conflict?.conflicting_work_order_name || conflict?.conflicting_work_order_id}". ${conflict?.action_required || ''}`,
+          { duration: 6000 }
+        );
+      } else if (errRes && errRes.statusCode === 400) {
+        toast.error(`Invalid Stage: ${errRes.message}`, { duration: 5000 });
+      } else {
+        toast.error(getErrorMessage(err));
+      }
     } finally {
       setAssigning(false);
     }
@@ -205,7 +223,12 @@ export default function WorkOrderDetailPage() {
       setUnassignMachineId('');
       fetchData();
     } catch (err) {
-      toast.error(getErrorMessage(err));
+      const errRes = err.response?.data;
+      if (errRes && errRes.statusCode === 404) {
+         toast.error(errRes.message || 'Machine is not assigned to this work order');
+      } else {
+         toast.error(getErrorMessage(err));
+      }
     } finally {
       setUnassigning(false);
     }
@@ -369,7 +392,10 @@ export default function WorkOrderDetailPage() {
           </button>
           <div>
             <h1 className="page-title">{workOrder.work_order_name}</h1>
-            <p className="page-subtitle">{workOrder.work_order_id || workOrderId}</p>
+            <p className="page-subtitle">
+              {workOrder.work_order_id || workOrderId}
+              {workOrder.targeted_end_date && ` • Target End: ${formatDate(workOrder.targeted_end_date)}`}
+            </p>
           </div>
         </div>
         <div className="flex items-center gap-3">
@@ -441,7 +467,7 @@ export default function WorkOrderDetailPage() {
             </div>
           </div>
           <div className="stat-card">
-            <div className="stat-icon stat-icon-purple"><TrendingUpIcon size={20} /></div>
+            <div className="stat-icon stat-icon-purple"><TrendingUp size={20} /></div>
             <div className="stat-info">
               <span className="stat-label">Progress</span>
               <span className="stat-value">{progress}%</span>
@@ -588,14 +614,14 @@ export default function WorkOrderDetailPage() {
                         View
                       </button>
                       <button
-                        className="btn btn-danger btn-sm btn-icon"
+                        className="btn btn-warning btn-sm"
                         onClick={() => {
                           setUnassignMachineId(m.machine_id);
                           setShowUnassignModal(true);
                         }}
-                        title="Remove machine"
+                        title="Remove machine from work order"
                       >
-                        <Trash2 size={14} />
+                        <Trash2 size={14} /> Unassign
                       </button>
                     </div>
                   </div>
@@ -860,80 +886,120 @@ export default function WorkOrderDetailPage() {
 
       {/* ==================== ASSIGN MACHINE MODAL ==================== */}
       {showAssignModal && (
-        <div className="modal-overlay" onClick={() => setShowAssignModal(false)}>
-          <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '560px' }}>
+        <div className="modal-overlay" onClick={() => { setShowAssignModal(false); setSelectedMachineToAssign(null); setStageOrder(1); }}>
+          <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: selectedMachineToAssign ? '400px' : '560px' }}>
             <div className="modal-header">
-              <h3 className="modal-title">Assign Machine to Work Order</h3>
-              <button className="btn btn-ghost btn-icon" onClick={() => setShowAssignModal(false)}>
+              <h3 className="modal-title">{selectedMachineToAssign ? 'Set Stage Order' : 'Assign Machine to Work Order'}</h3>
+              <button className="btn btn-ghost btn-icon" onClick={() => { setShowAssignModal(false); setSelectedMachineToAssign(null); setStageOrder(1); }}>
                 <X size={18} />
               </button>
             </div>
 
-            <div style={{ position: 'relative', marginBottom: 'var(--space-4)' }}>
-              <Search size={16} style={{ position: 'absolute', left: '14px', top: '50%', transform: 'translateY(-50%)', color: 'var(--color-text-muted)' }} />
-              <input
-                type="text"
-                placeholder="Search machines by name or ID..."
-                value={machineSearch}
-                onChange={(e) => setMachineSearch(e.target.value)}
-                style={{ paddingLeft: '40px' }}
-                autoFocus
-              />
-            </div>
-
-            <div style={{ maxHeight: '400px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
-              {availableMachines.length === 0 ? (
-                <div className="empty-state" style={{ padding: 'var(--space-6)' }}>
-                  <Monitor size={32} className="empty-state-icon" />
-                  <p className="empty-state-text">
-                    {machineSearch ? 'No matching machines found' : 'All machines are already assigned'}
+            {selectedMachineToAssign ? (
+              <form onSubmit={handleAssignMachine}>
+                <div style={{ marginBottom: 'var(--space-4)', padding: 'var(--space-3)', background: 'var(--color-bg-tertiary)', borderRadius: 'var(--radius-md)' }}>
+                  <p style={{ fontSize: 'var(--font-size-sm)', fontWeight: 600, color: 'var(--color-text-primary)' }}>
+                    Machine: {selectedMachineToAssign.machine_name}
+                  </p>
+                  <p style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)' }}>
+                    ID: {selectedMachineToAssign.machine_id}
                   </p>
                 </div>
-              ) : (
-                availableMachines.map((m) => (
-                  <div
-                    key={m.machine_id}
-                    style={{
-                      display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                      padding: 'var(--space-3) var(--space-4)',
-                      background: 'var(--color-bg-tertiary)', borderRadius: 'var(--radius-md)',
-                      border: '1px solid var(--color-border)', cursor: 'pointer',
-                      transition: 'all 0.15s ease',
-                    }}
-                    onMouseEnter={(e) => { e.currentTarget.style.borderColor = 'var(--color-accent-primary)'; e.currentTarget.style.background = 'var(--color-accent-primary-glow)'; }}
-                    onMouseLeave={(e) => { e.currentTarget.style.borderColor = ''; e.currentTarget.style.background = ''; }}
-                  >
-                    <div className="flex items-center gap-3">
-                      <div style={{
-                        width: 36, height: 36, borderRadius: 'var(--radius-md)',
-                        background: 'var(--color-accent-primary-glow)', color: 'var(--color-accent-primary)',
-                        display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      }}>
-                        <Monitor size={18} />
-                      </div>
-                      <div>
-                        <div style={{ fontWeight: 600, fontSize: 'var(--font-size-sm)', color: 'var(--color-text-primary)' }}>
-                          {m.machine_name}
-                        </div>
-                        <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)' }}>
-                          {m.machine_id} · Ingest: {m.ingest_path || 'N/A'}
-                        </div>
-                      </div>
+                
+                <div className="form-group">
+                  <label htmlFor="stage-order">Stage Order *</label>
+                  <input
+                    id="stage-order"
+                    type="number"
+                    min="1"
+                    value={stageOrder}
+                    onChange={(e) => setStageOrder(parseInt(e.target.value) || 1)}
+                    required
+                    autoFocus
+                  />
+                  <p style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)', marginTop: '4px' }}>
+                    The sequence order for this machine in the work order.
+                  </p>
+                </div>
+
+                <div className="modal-footer">
+                  <button type="button" className="btn btn-secondary" onClick={() => setSelectedMachineToAssign(null)}>
+                    Back
+                  </button>
+                  <button type="submit" className="btn btn-primary" disabled={assigning}>
+                    {assigning ? 'Assigning...' : 'Confirm Assignment'}
+                  </button>
+                </div>
+              </form>
+            ) : (
+              <>
+                <div style={{ position: 'relative', marginBottom: 'var(--space-4)' }}>
+                  <Search size={16} style={{ position: 'absolute', left: '14px', top: '50%', transform: 'translateY(-50%)', color: 'var(--color-text-muted)' }} />
+                  <input
+                    type="text"
+                    placeholder="Search machines by name or ID..."
+                    value={machineSearch}
+                    onChange={(e) => setMachineSearch(e.target.value)}
+                    style={{ paddingLeft: '40px' }}
+                    autoFocus
+                  />
+                </div>
+
+                <div style={{ maxHeight: '400px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
+                  {availableMachines.length === 0 ? (
+                    <div className="empty-state" style={{ padding: 'var(--space-6)' }}>
+                      <Monitor size={32} className="empty-state-icon" />
+                      <p className="empty-state-text">
+                        {machineSearch ? 'No matching machines found' : 'All machines are already assigned'}
+                      </p>
                     </div>
-                    <div className="flex items-center gap-2">
-                      <StatusBadge status={m.status} />
-                      <button
-                        className="btn btn-primary btn-sm"
-                        onClick={(e) => { e.stopPropagation(); handleAssignMachine(m.machine_id); }}
-                        disabled={assigning}
+                  ) : (
+                    availableMachines.map((m) => (
+                      <div
+                        key={m.machine_id}
+                        style={{
+                          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                          padding: 'var(--space-3) var(--space-4)',
+                          background: 'var(--color-bg-tertiary)', borderRadius: 'var(--radius-md)',
+                          border: '1px solid var(--color-border)', cursor: 'pointer',
+                          transition: 'all 0.15s ease',
+                        }}
+                        onMouseEnter={(e) => { e.currentTarget.style.borderColor = 'var(--color-accent-primary)'; e.currentTarget.style.background = 'var(--color-accent-primary-glow)'; }}
+                        onMouseLeave={(e) => { e.currentTarget.style.borderColor = ''; e.currentTarget.style.background = ''; }}
+                        onClick={() => setSelectedMachineToAssign(m)}
                       >
-                        <Plus size={14} /> Assign
-                      </button>
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
+                        <div className="flex items-center gap-3">
+                          <div style={{
+                            width: 36, height: 36, borderRadius: 'var(--radius-md)',
+                            background: 'var(--color-accent-primary-glow)', color: 'var(--color-accent-primary)',
+                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          }}>
+                            <Monitor size={18} />
+                          </div>
+                          <div>
+                            <div style={{ fontWeight: 600, fontSize: 'var(--font-size-sm)', color: 'var(--color-text-primary)' }}>
+                              {m.machine_name}
+                            </div>
+                            <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)' }}>
+                              {m.machine_id} · Ingest: {m.ingest_path || 'N/A'}
+                            </div>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <StatusBadge status={m.status} />
+                          <button
+                            className="btn btn-primary btn-sm"
+                            onClick={(e) => { e.stopPropagation(); setSelectedMachineToAssign(m); }}
+                          >
+                            <Plus size={14} /> Select
+                          </button>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}

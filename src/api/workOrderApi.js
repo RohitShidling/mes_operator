@@ -13,8 +13,8 @@ export const workOrderApi = {
   getMachines: (workOrderId) =>
     api.get(`/work-orders/${workOrderId}/machines`),
 
-  assignMachine: (workOrderId, machineId) =>
-    api.post(`/work-orders/${workOrderId}/machines`, { machine_id: machineId }),
+  assignMachine: (workOrderId, machineId, stageOrder) =>
+    api.post(`/work-orders/${workOrderId}/machines`, { machine_id: machineId, stage_order: stageOrder }),
 
   unassignMachine: (workOrderId, machineId) =>
     api.delete(`/work-orders/${workOrderId}/machines/${machineId}`),
