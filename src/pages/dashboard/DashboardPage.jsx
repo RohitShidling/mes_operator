@@ -6,7 +6,7 @@ import { machineApi } from '../../api/machineApi';
 import { workOrderApi } from '../../api/workOrderApi';
 import StatusBadge from '../../components/common/StatusBadge';
 import LoadingSpinner from '../../components/common/LoadingSpinner';
-import { getErrorMessage, formatDateTime, calcPercentage } from '../../utils/helpers';
+import { getErrorMessage, formatDateTime, calcPercentage, bufferToImageUrl } from '../../utils/helpers';
 import {
   Monitor,
   ClipboardList,
@@ -133,6 +133,16 @@ export default function DashboardPage() {
             <span className="stat-value">{allWorkOrders.length}</span>
           </div>
         </div>
+
+        <div className="stat-card" onClick={() => navigate('/rejections')} style={{ cursor: 'pointer' }}>
+          <div className="stat-icon stat-icon-yellow">
+            <AlertTriangle size={22} />
+          </div>
+          <div className="stat-info">
+            <span className="stat-label">Rejections</span>
+            <span className="stat-value">{allRejections.reduce((sum, r) => sum + (r.rejected_count || 0), 0)}</span>
+          </div>
+        </div>
       </div>
 
       <div className="dashboard-grid">
@@ -151,15 +161,25 @@ export default function DashboardPage() {
             </div>
           ) : (
             <div className="dashboard-list">
-              {myMachines.slice(0, 5).map((machine, idx) => (
-                <div key={machine.machine_id || idx} className="dashboard-list-item" onClick={() => navigate(`/machines/${machine.machine_id}`)}>
-                  <div className="dashboard-list-info">
-                    <span className="dashboard-list-name">{machine.machine_name}</span>
-                    <span className="dashboard-list-id">{machine.machine_id}</span>
+              {myMachines.slice(0, 5).map((machine, idx) => {
+                // Resolve counts from allMachines data
+                const fullMachine = allMachines.find((am) => am.machine_id === machine.machine_id);
+                const run = fullMachine?.current_run || machine?.current_run;
+                const prodCount = run?.total_count ?? machine?.production_count ?? fullMachine?.production_count ?? 0;
+                const rejCount = run?.rejected_count ?? Number(machine?.total_rejected ?? fullMachine?.total_rejected ?? 0);
+
+                return (
+                  <div key={machine.machine_id || idx} className="dashboard-list-item" onClick={() => navigate(`/machines/${machine.machine_id}`)}>
+                    <div className="dashboard-list-info">
+                      <span className="dashboard-list-name">{machine.machine_name}</span>
+                      <span className="dashboard-list-id">
+                        {machine.machine_id} · Prod: {prodCount}{rejCount > 0 ? ` · Rej: ${rejCount}` : ''}
+                      </span>
+                    </div>
+                    <StatusBadge status={machine.status} />
                   </div>
-                  <StatusBadge status={machine.status} />
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>

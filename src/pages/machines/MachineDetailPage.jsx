@@ -5,10 +5,10 @@ import { machineApi } from '../../api/machineApi';
 import { operatorApi } from '../../api/operatorApi';
 import StatusBadge from '../../components/common/StatusBadge';
 import LoadingSpinner from '../../components/common/LoadingSpinner';
-import { getErrorMessage, formatDateTime } from '../../utils/helpers';
+import { getErrorMessage, formatDateTime, bufferToImageUrl } from '../../utils/helpers';
 import {
   ArrowLeft, Monitor, Activity, TrendingUp, Users, AlertTriangle, RefreshCw,
-  Play, Pause, Square, Zap, StopCircle,
+  Play, Pause, Square, Zap, StopCircle, Image as ImageIcon,
 } from 'lucide-react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import toast from 'react-hot-toast';
@@ -25,9 +25,11 @@ export default function MachineDetailPage() {
   const { subscribeMachine, unsubscribeMachine, subscribe } = useSocket();
   const [loading, setLoading] = useState(true);
   const [machine, setMachine] = useState(null);
+  const [allMachineData, setAllMachineData] = useState(null);
   const [visualization, setVisualization] = useState(null);
   const [operators, setOperators] = useState([]);
   const [breakdowns, setBreakdowns] = useState([]);
+  const [rejections, setRejections] = useState([]);
   const [filter, setFilter] = useState('hourly');
   const [updating, setUpdating] = useState(false);
   const [ingesting, setIngesting] = useState(false);
@@ -35,18 +37,31 @@ export default function MachineDetailPage() {
 
   const fetchData = async () => {
     try {
-      const [detailsRes, vizRes, opsRes, bdRes] = await Promise.allSettled([
+      const [detailsRes, allMachinesRes, vizRes, opsRes, bdRes, rejRes] = await Promise.allSettled([
         machineApi.getDetails(machineId),
+        machineApi.getAll(),
         machineApi.getVisualization(machineId, { filter }),
         operatorApi.getMachineOperators(machineId),
         operatorApi.getBreakdownsByMachine(machineId),
+        operatorApi.getRejectionsByMachine(machineId),
       ]);
 
       if (detailsRes.status === 'fulfilled') {
         setMachine(detailsRes.value.data.data || detailsRes.value.data);
       }
+
+      // Get the full machine data from /machines (has current_run, machine_image)
+      if (allMachinesRes.status === 'fulfilled') {
+        const allData = allMachinesRes.value.data.data || allMachinesRes.value.data || [];
+        const allArr = Array.isArray(allData) ? allData : [];
+        const found = allArr.find((m) => m.machine_id === machineId);
+        setAllMachineData(found || null);
+      }
+
       if (vizRes.status === 'fulfilled') {
-        setVisualization(vizRes.value.data.data || vizRes.value.data);
+        const vizData = vizRes.value.data.data || vizRes.value.data;
+        console.log('[MachineDetail] Visualization raw response:', vizData);
+        setVisualization(vizData);
       }
       if (opsRes.status === 'fulfilled') {
         const ops = opsRes.value.data.data || opsRes.value.data || [];
@@ -55,6 +70,10 @@ export default function MachineDetailPage() {
       if (bdRes.status === 'fulfilled') {
         const bds = bdRes.value.data.data || bdRes.value.data || [];
         setBreakdowns(Array.isArray(bds) ? bds : []);
+      }
+      if (rejRes.status === 'fulfilled') {
+        const rejData = rejRes.value.data.data || rejRes.value.data || [];
+        setRejections(Array.isArray(rejData) ? rejData : []);
       }
     } catch (err) {
       toast.error(getErrorMessage(err));
@@ -90,16 +109,13 @@ export default function MachineDetailPage() {
     }
   };
 
-  // Ingest uses ingest_path (NOT machine_id)
-  // e.g. POST /api/ingest/cnc-lathe-1
-  // Only allowed when machine is RUNNING
   const handleIngest = async () => {
     if (machine?.status !== 'RUNNING') {
       toast.error('Machine must be RUNNING to add production count.');
       return;
     }
 
-    const ingestPath = machine?.ingest_path;
+    const ingestPath = machine?.ingest_path || allMachineData?.ingest_path;
     if (!ingestPath) {
       toast.error('Ingest path not configured for this machine.');
       return;
@@ -118,16 +134,13 @@ export default function MachineDetailPage() {
     }
   };
 
-  // Stop machine - first set status to NOT_STARTED, then call stop API
   const handleStopMachine = async () => {
     setStopping(true);
     try {
-      // First try to set status to NOT_STARTED via operator API
       await operatorApi.updateMachineStatus(machineId, 'NOT_STARTED');
       toast.success('Machine stopped and set to NOT_STARTED');
       fetchData();
     } catch (err) {
-      // If that fails, try the stop endpoint
       try {
         await machineApi.stopMachine(machineId);
         toast.success('Machine stopped');
@@ -143,14 +156,44 @@ export default function MachineDetailPage() {
   if (loading) return <LoadingSpinner text="Loading machine details..." />;
   if (!machine) return <div className="page-container"><p>Machine not found.</p></div>;
 
-  // Prepare chart data
-  const hourlyData = visualization?.hourly || visualization?.hourly_data || [];
-  const dailyData = visualization?.daily || visualization?.daily_data || [];
-  const chartData = filter === 'hourly' ? hourlyData : dailyData;
+  // ===== RESOLVE PRODUCTION & REJECTION COUNTS =====
+  // current_run comes from GET /machines (allMachineData)
+  const currentRun = allMachineData?.current_run || machine?.current_run;
+  const productionCount =
+    currentRun?.total_count ??
+    machine?.production_count ??
+    allMachineData?.production_count ??
+    0;
+
+  // Rejection count: sum from rejections API or from current_run
+  const rejectionCountFromRejections = Array.isArray(rejections)
+    ? rejections.reduce((sum, r) => sum + (r.rejected_count || 0), 0)
+    : 0;
+  const rejectionCount =
+    rejectionCountFromRejections ||
+    currentRun?.rejected_count ||
+    Number(machine?.total_rejected ?? machine?.rejection_count ?? allMachineData?.total_rejected ?? 0);
+
+  // ===== MACHINE IMAGE =====
+  const rawImage = allMachineData?.machine_image ?? machine?.machine_image;
+  const machineImgSrc = bufferToImageUrl(rawImage);
+
+  // ===== CHART DATA =====
+  const hourlyData = visualization?.hourly || visualization?.hourly_data || visualization?.production_data?.hourly || [];
+  const dailyData = visualization?.daily || visualization?.daily_data || visualization?.production_data?.daily || [];
+
+  // If the visualization itself is an array, use it directly
+  let chartData = filter === 'hourly' ? hourlyData : dailyData;
+  if (!Array.isArray(chartData) && Array.isArray(visualization)) {
+    chartData = visualization;
+  }
+
   const formattedChart = Array.isArray(chartData) ? chartData.map((d) => ({
-    label: d.hour !== undefined ? `${d.hour}:00` : d.date || d.day || '',
-    count: d.production_count || d.count || 0,
+    label: d.hour !== undefined ? `${d.hour}:00` : d.date || d.day || d.label || d.time || '',
+    count: d.production_count || d.count || d.total_count || d.value || 0,
   })) : [];
+
+  const ingestPath = machine?.ingest_path || allMachineData?.ingest_path;
 
   return (
     <div className="page-container">
@@ -163,9 +206,9 @@ export default function MachineDetailPage() {
             <h1 className="page-title">{machine.machine_name || machineId}</h1>
             <p className="page-subtitle">
               {machine.machine_id}
-              {machine.ingest_path && (
+              {ingestPath && (
                 <span style={{ marginLeft: '8px', color: 'var(--color-accent-primary)' }}>
-                  · Ingest: {machine.ingest_path}
+                  · Ingest: {ingestPath}
                 </span>
               )}
             </p>
@@ -179,13 +222,49 @@ export default function MachineDetailPage() {
         </div>
       </div>
 
+      {/* Machine Image */}
+      <div className="card mb-6">
+        <div style={{
+          width: '100%',
+          height: '220px',
+          borderRadius: 'var(--radius-md)',
+          background: 'var(--color-bg-tertiary)',
+          overflow: 'hidden',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          border: '1px solid var(--color-border)',
+        }}>
+          {machineImgSrc ? (
+            <img
+              src={machineImgSrc}
+              alt={machine.machine_name}
+              style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+              onError={(e) => {
+                e.target.style.display = 'none';
+                e.target.nextSibling.style.display = 'flex';
+              }}
+            />
+          ) : null}
+          <div style={{
+            display: machineImgSrc ? 'none' : 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            gap: 'var(--space-2)',
+            color: 'var(--color-text-muted)',
+          }}>
+            <ImageIcon size={40} opacity={0.5} />
+            <span style={{ fontSize: 'var(--font-size-sm)' }}>No Machine Image</span>
+          </div>
+        </div>
+      </div>
+
       {/* Quick Actions */}
       <div className="card mb-6">
         <div className="card-header">
           <h2 className="card-title">Quick Actions</h2>
         </div>
         <div className="flex items-center gap-3" style={{ flexWrap: 'wrap' }}>
-          {/* Status Change Buttons */}
           {STATUS_OPTIONS.map((opt) => (
             <button
               key={opt.value}
@@ -200,12 +279,11 @@ export default function MachineDetailPage() {
 
           <div style={{ height: '28px', width: '1px', background: 'var(--color-border)' }} />
 
-          {/* Production count - only works when machine is RUNNING */}
           <button
             className="btn btn-success btn-sm"
             onClick={handleIngest}
             disabled={ingesting || machine.status !== 'RUNNING'}
-            title={machine.status !== 'RUNNING' ? 'Machine must be RUNNING to add production' : `Add production count +1 (Ingest: ${machine.ingest_path || 'N/A'})`}
+            title={machine.status !== 'RUNNING' ? 'Machine must be RUNNING to add production' : `Add production count +1 (Ingest: ${ingestPath || 'N/A'})`}
           >
             <Zap size={14} />
             {ingesting ? 'Adding...' : 'Production +1'}
@@ -228,14 +306,14 @@ export default function MachineDetailPage() {
           <div className="stat-icon stat-icon-blue"><Activity size={22} /></div>
           <div className="stat-info">
             <span className="stat-label">Production Count</span>
-            <span className="stat-value">{machine.production_count || 0}</span>
+            <span className="stat-value">{productionCount}</span>
           </div>
         </div>
         <div className="stat-card">
           <div className="stat-icon stat-icon-red"><AlertTriangle size={22} /></div>
           <div className="stat-info">
             <span className="stat-label">Rejections</span>
-            <span className="stat-value">{machine.rejection_count || 0}</span>
+            <span className="stat-value">{rejectionCount}</span>
           </div>
         </div>
         <div className="stat-card">
@@ -290,11 +368,56 @@ export default function MachineDetailPage() {
             </ResponsiveContainer>
           </div>
         ) : (
-          <p style={{ color: 'var(--color-text-muted)', textAlign: 'center', padding: 'var(--space-8)' }}>
-            No visualization data available
-          </p>
+          <div style={{
+            color: 'var(--color-text-muted)', textAlign: 'center', padding: 'var(--space-8)',
+            display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 'var(--space-3)',
+          }}>
+            <Activity size={40} style={{ opacity: 0.3 }} />
+            <p>No visualization data available for this filter.</p>
+            <p style={{ fontSize: 'var(--font-size-xs)' }}>
+              Start production to see data here.
+            </p>
+          </div>
         )}
       </div>
+
+      {/* Rejection History */}
+      {rejections.length > 0 && (
+        <div className="card mb-6">
+          <div className="card-header">
+            <h2 className="card-title">Rejection History</h2>
+            <span className="badge badge-danger">{rejectionCount} total rejected</span>
+          </div>
+          <div className="table-container">
+            <table>
+              <thead>
+                <tr>
+                  <th>Reason</th>
+                  <th>Count</th>
+                  <th>Work Order</th>
+                  <th>Reported By</th>
+                  <th>Date</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rejections.map((rej, idx) => (
+                  <tr key={rej.id || idx}>
+                    <td style={{ color: 'var(--color-text-primary)', fontWeight: 600 }}>
+                      {rej.rejection_reason || '—'}
+                    </td>
+                    <td><span className="badge badge-danger">{rej.rejected_count} pcs</span></td>
+                    <td style={{ color: 'var(--color-accent-primary)' }}>{rej.work_order_id || '—'}</td>
+                    <td>{rej.operator_name || '—'}</td>
+                    <td style={{ color: 'var(--color-text-muted)', whiteSpace: 'nowrap' }}>
+                      {formatDateTime(rej.created_at)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
       {/* Operators & Breakdowns */}
       <div className="grid grid-2">

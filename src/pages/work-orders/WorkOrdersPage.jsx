@@ -100,7 +100,8 @@ export default function WorkOrdersPage() {
       ) : (
         <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(360px, 1fr))' }}>
           {filtered.map((wo) => {
-            const progress = calcPercentage(wo.produced_count || 0, wo.target);
+            const progress = calcPercentage(wo.total_produced || wo.produced_count || 0, wo.target);
+            const totalRej = wo.total_rejected || 0;
             return (
               <div
                 key={wo.work_order_id}
@@ -144,7 +145,12 @@ export default function WorkOrdersPage() {
 
                 <div className="flex items-center justify-between mt-4" style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)' }}>
                   <span>Created: {formatDate(wo.created_at)}</span>
-                  <ArrowRight size={14} />
+                  <div className="flex items-center gap-3">
+                    {totalRej > 0 && (
+                      <span style={{ color: 'var(--color-danger)', fontWeight: 600 }}>Rejected: {totalRej}</span>
+                    )}
+                    <ArrowRight size={14} />
+                  </div>
                 </div>
               </div>
             );

@@ -102,15 +102,19 @@ export default function WorkOrderDetailPage() {
       if (wfRes.status === 'fulfilled') setWorkflow(wfRes.value.data.data || wfRes.value.data);
       if (rejRes.status === 'fulfilled') {
         const raw = rejRes.value.data;
+        // API returns { data: { work_order: {..., total_rejected}, rejections_by_machine: [...] } }
+        const inner = raw?.data || raw;
         let r = [];
-        if (raw?.data?.rejections && Array.isArray(raw.data.rejections)) {
-          r = raw.data.rejections;
-        } else if (raw?.rejections && Array.isArray(raw.rejections)) {
-          r = raw.rejections;
-        } else if (Array.isArray(raw?.data)) {
-          r = raw.data;
-        } else if (Array.isArray(raw)) {
-          r = raw;
+        if (inner?.rejections_by_machine && Array.isArray(inner.rejections_by_machine)) {
+          r = inner.rejections_by_machine;
+        } else if (inner?.rejections && Array.isArray(inner.rejections)) {
+          r = inner.rejections;
+        } else if (Array.isArray(inner)) {
+          r = inner;
+        }
+        // Also store work_order data for total_rejected
+        if (inner?.work_order) {
+          setWorkOrder((prev) => prev ? { ...prev, total_rejected: inner.work_order.total_rejected, total_produced: inner.work_order.total_produced, total_accepted: inner.work_order.total_accepted } : prev);
         }
         setRejections(r);
       }
@@ -227,7 +231,7 @@ export default function WorkOrderDetailPage() {
       formData.append('rejected_count', rejectionForm.rejected_count);
       formData.append('rejection_reason', rejectionForm.rejection_reason);
       if (rejectionForm.image) {
-        formData.append('image', rejectionForm.image);
+        formData.append('part_image', rejectionForm.image);
       }
 
       await operatorApi.reportRejection(formData);
@@ -344,9 +348,10 @@ export default function WorkOrderDetailPage() {
   if (loading) return <LoadingSpinner text="Loading work order details..." />;
   if (!workOrder) return <div className="page-container"><p>Work order not found.</p></div>;
 
-  const progress = calcPercentage(workOrder.produced_count || 0, workOrder.target);
+  const progress = calcPercentage(workOrder.total_produced || workOrder.produced_count || 0, workOrder.target);
   const steps = workflow?.steps || workflow?.workflow_steps || [];
-  const totalRejections = Array.isArray(rejections) ? rejections.reduce((sum, r) => sum + (r.rejected_count || 0), 0) : 0;
+  // total_rejected comes from the work_order object in the rejections API response
+  const totalRejections = workOrder.total_rejected ?? (Array.isArray(rejections) ? rejections.reduce((sum, r) => sum + (Number(r.total_rejected) || r.rejected_count || 0), 0) : 0);
 
   // Available machines (not already assigned)
   const assignedMachineIds = machines.map((m) => m.machine_id);
@@ -425,7 +430,7 @@ export default function WorkOrderDetailPage() {
             <div className="stat-icon stat-icon-green"><Hash size={20} /></div>
             <div className="stat-info">
               <span className="stat-label">Produced</span>
-              <span className="stat-value">{workOrder.produced_count || 0}</span>
+              <span className="stat-value">{workOrder.total_produced || workOrder.produced_count || 0}</span>
             </div>
           </div>
           <div className="stat-card">
@@ -490,6 +495,9 @@ export default function WorkOrderDetailPage() {
             <div className="checklist-grid" style={{ padding: 'var(--space-4)' }}>
               {machines.map((m, idx) => {
                 const fullMachine = allMachines.find((am) => am.machine_id === m.machine_id);
+                const run = fullMachine?.current_run || m.current_run;
+                const machProdCount = run?.total_count ?? m.production_count ?? fullMachine?.production_count ?? 0;
+                const machRejCount = run?.rejected_count ?? Number(m.total_rejected ?? fullMachine?.total_rejected ?? m.rejection_count ?? 0);
                 
                 return (
                   <div key={m.machine_id || idx} className="checklist-card card" style={{ padding: 'var(--space-4)' }}>
@@ -522,9 +530,9 @@ export default function WorkOrderDetailPage() {
                       justifyContent: 'center',
                       border: '1px solid var(--color-border)',
                     }}>
-                      {(fullMachine?.image || m.image) ? (
+                      {(fullMachine?.machine_image || m.machine_image) ? (
                         <img
-                          src={bufferToImageUrl(fullMachine?.image || m.image)}
+                          src={bufferToImageUrl(fullMachine?.machine_image || m.machine_image)}
                           alt={m.machine_name}
                           style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                           onError={(e) => {
@@ -534,7 +542,7 @@ export default function WorkOrderDetailPage() {
                         />
                       ) : null}
                       <div style={{
-                        display: (fullMachine?.image || m.image) ? 'none' : 'flex',
+                        display: (fullMachine?.machine_image || m.machine_image) ? 'none' : 'flex',
                         flexDirection: 'column',
                         alignItems: 'center',
                         gap: 'var(--space-2)',
@@ -549,15 +557,15 @@ export default function WorkOrderDetailPage() {
                     <div className="checklist-stats" style={{ background: 'var(--color-bg-tertiary)' }}>
                       <div className="checklist-stat">
                         <span className="checklist-stat-label">Production</span>
-                        <span className="checklist-stat-value" style={{ fontSize: 'var(--font-size-lg)' }}>{m.production_count || 0}</span>
+                        <span className="checklist-stat-value" style={{ fontSize: 'var(--font-size-lg)' }}>{machProdCount}</span>
                       </div>
                       <div className="checklist-stat">
                         <span className="checklist-stat-label">Rejections</span>
                         <span className="checklist-stat-value" style={{ 
                           fontSize: 'var(--font-size-lg)',
-                          color: (m.rejection_count || 0) > 0 ? 'var(--color-danger)' : undefined 
+                          color: machRejCount > 0 ? 'var(--color-danger)' : undefined 
                         }}>
-                          {m.rejection_count || 0}
+                          {machRejCount}
                         </span>
                       </div>
                     </div>
@@ -759,20 +767,24 @@ export default function WorkOrderDetailPage() {
             </div>
           ) : (
             <>
-              {/* Summary by machine */}
+              {/* Summary by machine - from rejections_by_machine API data */}
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 'var(--space-3)', marginBottom: 'var(--space-5)' }}>
-                {machines.map((m) => {
-                  const machineRejections = rejections.filter((r) => r.machine_id === m.machine_id);
-                  const count = machineRejections.reduce((sum, r) => sum + (r.rejected_count || 0), 0);
+                {rejections.map((r, idx) => {
+                  const count = Number(r.total_rejected) || r.rejected_count || 0;
                   return (
-                    <div key={m.machine_id} style={{
+                    <div key={r.machine_id || idx} style={{
                       padding: 'var(--space-3)', background: 'var(--color-bg-tertiary)', borderRadius: 'var(--radius-md)',
                       border: '1px solid var(--color-border)',
                     }}>
-                      <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)', marginBottom: '4px' }}>{m.machine_name}</div>
+                      <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)', marginBottom: '4px' }}>{r.machine_name || r.machine_id}</div>
                       <div style={{ fontSize: 'var(--font-size-lg)', fontWeight: 800, color: count > 0 ? 'var(--color-danger)' : 'var(--color-success)' }}>
                         {count} <span style={{ fontSize: 'var(--font-size-xs)', fontWeight: 400 }}>rejected</span>
                       </div>
+                      {r.rejection_entries && (
+                        <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)', marginTop: '4px' }}>
+                          {r.rejection_entries} rejection entries
+                        </div>
+                      )}
                     </div>
                   );
                 })}
@@ -796,9 +808,9 @@ export default function WorkOrderDetailPage() {
                           {rej.machine_name || rej.machine_id}
                         </td>
                         <td>
-                          {rej.image_data || rej.image ? (
+                          {rej.part_image || rej.image_data || rej.image ? (
                             <img 
-                              src={bufferToImageUrl(rej.image_data || rej.image)} 
+                              src={bufferToImageUrl(rej.part_image || rej.image_data || rej.image)} 
                               alt="Rejection" 
                               style={{ width: '40px', height: '40px', objectFit: 'cover', borderRadius: '4px' }}
                               onClick={(e) => {
