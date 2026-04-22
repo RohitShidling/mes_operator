@@ -21,7 +21,7 @@ export function AuthProvider({ children }) {
           // Verify token by fetching profile
           const response = await authApi.getProfile();
           const userData = response.data?.data || response.data || JSON.parse(savedUser || '{}');
-          
+
           setUser(userData);
           setIsAuthenticated(true);
           localStorage.setItem('operator_user', JSON.stringify(userData));
@@ -54,10 +54,10 @@ export function AuthProvider({ children }) {
   const login = useCallback(async (credentials) => {
     try {
       const response = await authApi.login(credentials);
-      
+
       // Axios typically nests the actual JSON body in `response.data`
       const data = response.data?.data || response.data;
-      
+
       if (!data) {
         throw new Error('Invalid response from server');
       }
@@ -76,8 +76,8 @@ export function AuthProvider({ children }) {
 
       // Instead of another API call, we can just use the user data from the login response if available.
       // If it only returns tokens, then fallback to profile fetch
-      let finalUser = userData;
-      if (!userData.email && !userData.username && !userData.operator_id) {
+      let finalUser = userData.user || userData;
+      if (!finalUser.email && !finalUser.username && !finalUser.operator_id) {
         const profileRes = await authApi.getProfile();
         finalUser = profileRes.data?.data || profileRes.data;
       }
@@ -100,7 +100,7 @@ export function AuthProvider({ children }) {
       } else if (err.response?.data?.error) {
         message = err.response.data.error;
       }
-      
+
       toast.error(message);
       return { success: false, message };
     }
@@ -109,7 +109,7 @@ export function AuthProvider({ children }) {
   const register = useCallback(async (userData) => {
     try {
       const response = await authApi.register(userData);
-      
+
       const data = response.data?.data || response.data;
       const { accessToken, refreshToken, token, ...registeredUser } = data || {};
       const actualToken = accessToken || token;
@@ -118,8 +118,8 @@ export function AuthProvider({ children }) {
         localStorage.setItem('operator_token', actualToken);
         if (refreshToken) localStorage.setItem('operator_refresh_token', refreshToken);
 
-        let finalUser = registeredUser;
-        if (!registeredUser.email && !registeredUser.username) {
+        let finalUser = registeredUser.user || registeredUser;
+        if (!finalUser.email && !finalUser.username) {
            const profileRes = await authApi.getProfile();
            finalUser = profileRes.data?.data || profileRes.data;
         }

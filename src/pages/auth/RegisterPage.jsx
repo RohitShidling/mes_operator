@@ -8,7 +8,6 @@ export default function RegisterPage() {
   const navigate = useNavigate();
   const { register } = useAuth();
   const [username, setUsername] = useState('');
-  const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -25,17 +24,12 @@ export default function RegisterPage() {
 
     // JavaScript validation
     const trimmedUsername = username.trim();
-    const trimmedFullName = fullName.trim();
     const trimmedEmail = email.trim();
     const trimmedPassword = password.trim();
     const trimmedConfirm = confirmPassword.trim();
 
     if (!trimmedUsername) {
       setError('Username is required');
-      return;
-    }
-    if (!trimmedFullName) {
-      setError('Full name is required');
       return;
     }
     if (!trimmedEmail) {
@@ -59,7 +53,6 @@ export default function RegisterPage() {
     try {
       const result = await register({
         username: trimmedUsername,
-        full_name: trimmedFullName,
         email: trimmedEmail,
         password: trimmedPassword,
       });
@@ -113,21 +106,6 @@ export default function RegisterPage() {
               </div>
             </div>
 
-            <div className="form-group">
-              <label htmlFor="reg-fullname">Full Name</label>
-              <div className="input-with-icon">
-                <span className="input-icon-wrap">
-                  <User size={18} />
-                </span>
-                <input
-                  id="reg-fullname"
-                  type="text"
-                  placeholder="Enter your full name"
-                  value={fullName}
-                  onChange={(e) => { setFullName(e.target.value); clearError(); }}
-                />
-              </div>
-            </div>
 
             <div className="form-group">
               <label htmlFor="reg-email">Email Address</label>

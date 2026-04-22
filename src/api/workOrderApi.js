@@ -4,6 +4,9 @@ export const workOrderApi = {
   getAll: () =>
     api.get('/work-orders'),
 
+  create: (data) =>
+    api.post('/work-orders', data),
+
   getById: (workOrderId) =>
     api.get(`/work-orders/${workOrderId}`),
 
