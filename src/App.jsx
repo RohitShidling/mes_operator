@@ -16,6 +16,7 @@ import RegisterPage from './pages/auth/RegisterPage';
 import DashboardPage from './pages/dashboard/DashboardPage';
 import MachineChecklistPage from './pages/machines/MachineChecklistPage';
 import MachineDetailPage from './pages/machines/MachineDetailPage';
+import MachineChecklistFormPage from './pages/checklists/MachineChecklistFormPage';
 import WorkOrdersPage from './pages/work-orders/WorkOrdersPage';
 import WorkOrderDetailPage from './pages/work-orders/WorkOrderDetailPage';
 import RejectionsPage from './pages/rejections/RejectionsPage';
@@ -73,6 +74,7 @@ function AppRoutes() {
       >
         <Route index element={<DashboardPage />} />
         <Route path="machines" element={<MachineChecklistPage />} />
+        <Route path="machine-checklist" element={<MachineChecklistFormPage />} />
         <Route path="machines/:machineId" element={<MachineDetailPage />} />
         <Route path="work-orders" element={<WorkOrdersPage />} />
         <Route path="work-orders/:workOrderId" element={<WorkOrderDetailPage />} />

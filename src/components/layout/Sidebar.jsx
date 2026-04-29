@@ -3,6 +3,7 @@ import {
   LayoutDashboard,
   Monitor,
   ClipboardList,
+  ClipboardCheck,
   AlertOctagon,
   ShieldAlert,
   Wrench,
@@ -15,7 +16,8 @@ import './Sidebar.css';
 
 const navItems = [
   { path: '/', icon: LayoutDashboard, label: 'Dashboard' },
-  { path: '/machines', icon: Monitor, label: 'Machine Checklist' },
+  { path: '/machines', icon: Monitor, label: 'Machines' },
+  { path: '/machine-checklist', icon: ClipboardCheck, label: 'Machine Checklist' },
   { path: '/work-orders', icon: ClipboardList, label: 'Work Orders' },
   { path: '/assignments', icon: Users, label: 'My Assignments' },
   { path: '/rejections', icon: AlertOctagon, label: 'Rejections' },

@@ -50,6 +50,12 @@ export const operatorApi = {
   reportBreakdown: (data) =>
     api.post('/operator/breakdowns', data),
 
+  reportBreakdownByMachine: (machineId, data) =>
+    api.post(`/operator/breakdowns/${machineId}`, data),
+
+  getBreakdownReasons: () =>
+    api.get('/operator/breakdowns/reasons'),
+
   updateBreakdownStatus: (breakdownId, status) =>
     api.patch(`/operator/breakdowns/${breakdownId}/status`, { status }),
 

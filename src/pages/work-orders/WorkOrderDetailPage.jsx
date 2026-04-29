@@ -33,6 +33,7 @@ export default function WorkOrderDetailPage() {
   const [machines, setMachines] = useState([]);
   const [workflow, setWorkflow] = useState(null);
   const [rejections, setRejections] = useState([]);
+  const [productionCounts, setProductionCounts] = useState({});
   const [updatingStep, setUpdatingStep] = useState({});
   const [updatingWoStatus, setUpdatingWoStatus] = useState(false);
 
@@ -100,6 +101,9 @@ export default function WorkOrderDetailPage() {
         }
         console.log('[WorkOrderDetail] Machines response:', raw, '=> extracted:', m);
         setMachines(m);
+
+        // Fetch production counts for all assigned machines
+        await fetchProductionCounts(m);
       }
       if (wfRes.status === 'fulfilled') setWorkflow(wfRes.value.data.data || wfRes.value.data);
       if (rejRes.status === 'fulfilled') {
@@ -140,6 +144,21 @@ export default function WorkOrderDetailPage() {
       setLoading(false);
     }
   }, [workOrderId]);
+
+  const fetchProductionCounts = async (machineList) => {
+    const counts = {};
+    const results = await Promise.allSettled(
+      machineList.map((m) => machineApi.getProductionCount(m.machine_id))
+    );
+
+    results.forEach((result, index) => {
+      if (result.status === 'fulfilled' && result.value.data?.data) {
+        counts[machineList[index].machine_id] = result.value.data.data;
+      }
+    });
+
+    setProductionCounts(counts);
+  };
 
   useEffect(() => {
     fetchData();
@@ -521,10 +540,16 @@ export default function WorkOrderDetailPage() {
             <div className="checklist-grid" style={{ padding: 'var(--space-4)' }}>
               {machines.map((m, idx) => {
                 const fullMachine = allMachines.find((am) => am.machine_id === m.machine_id);
-                const run = fullMachine?.current_run || m.current_run;
-                const machProdCount = run?.total_count ?? m.production_count ?? fullMachine?.production_count ?? 0;
-                const machRejCount = run?.rejected_count ?? Number(m.total_rejected ?? fullMachine?.total_rejected ?? m.rejection_count ?? 0);
-                
+
+                // Production & rejection counts from API
+                const productionData = productionCounts[m.machine_id];
+                const machProdCount = productionData?.total_production_count
+                  ? Number(productionData.total_production_count)
+                  : 0;
+                const machRejCount = productionData?.total_rejected_count
+                  ? Number(productionData.total_rejected_count)
+                  : 0;
+
                 return (
                   <div key={m.machine_id || idx} className="checklist-card card" style={{ padding: 'var(--space-4)' }}>
                     <div className="checklist-card-header" style={{ marginBottom: 'var(--space-3)' }}>

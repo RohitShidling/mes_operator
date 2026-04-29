@@ -16,6 +16,9 @@ export const machineApi = {
   getHistory: (machineId) =>
     api.get(`/machines/${machineId}/history`),
 
+  getProductionCount: (machineId) =>
+    api.get(`/machines/${machineId}/production-count`),
+
   createMachine: (formData) =>
     api.post('/machines', formData, {
       headers: { 'Content-Type': 'multipart/form-data' },

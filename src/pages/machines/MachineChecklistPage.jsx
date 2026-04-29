@@ -23,6 +23,7 @@ export default function MachineChecklistPage() {
   const [loading, setLoading] = useState(true);
   const [machines, setMachines] = useState([]);
   const [allMachineDetails, setAllMachineDetails] = useState([]);
+  const [productionCounts, setProductionCounts] = useState({});
   const [updating, setUpdating] = useState({});
   const [ingesting, setIngesting] = useState({});
   const [filter, setFilter] = useState('ALL');
@@ -52,11 +53,29 @@ export default function MachineChecklistPage() {
         return detail ? { ...detail, ...m } : m;
       });
       setMachines(merged);
+
+      // Fetch production counts for all machines
+      await fetchProductionCounts(merged);
     } catch (err) {
       toast.error(getErrorMessage(err));
     } finally {
       setLoading(false);
     }
+  };
+
+  const fetchProductionCounts = async (machineList) => {
+    const counts = {};
+    const results = await Promise.allSettled(
+      machineList.map((m) => machineApi.getProductionCount(m.machine_id))
+    );
+
+    results.forEach((result, index) => {
+      if (result.status === 'fulfilled' && result.value.data?.data) {
+        counts[machineList[index].machine_id] = result.value.data.data;
+      }
+    });
+
+    setProductionCounts(counts);
   };
 
   useEffect(() => {
@@ -125,13 +144,13 @@ export default function MachineChecklistPage() {
     return matchesFilter && matchesSearch;
   });
 
-  if (loading) return <LoadingSpinner text="Loading machine checklist..." />;
+  if (loading) return <LoadingSpinner text="Loading machines..." />;
 
   return (
     <div className="page-container">
       <div className="page-header">
         <div>
-          <h1 className="page-title">Machine Checklist</h1>
+          <h1 className="page-title">Machines</h1>
           <p className="page-subtitle">View and update machine statuses, track production</p>
         </div>
         <button className="btn btn-secondary" onClick={fetchChecklist}>
@@ -185,16 +204,14 @@ export default function MachineChecklistPage() {
             // Image: field is machine_image (byte array from API)
             const rawImage = machine.machine_image ?? fullMachine?.machine_image;
 
-            // Production & rejection counts
-            const run = machine.current_run ?? fullMachine?.current_run;
-            const productionCount =
-              run?.total_count ??
-              machine.production_count ??
-              fullMachine?.production_count ??
-              0;
-            const rejectionCount =
-              run?.rejected_count ??
-              Number(machine.total_rejected ?? fullMachine?.total_rejected ?? machine.rejection_count ?? 0);
+            // Production & rejection counts from API
+            const productionData = productionCounts[machine.machine_id];
+            const productionCount = productionData?.total_production_count
+              ? Number(productionData.total_production_count)
+              : 0;
+            const rejectionCount = productionData?.total_rejected_count
+              ? Number(productionData.total_rejected_count)
+              : 0;
 
             return (
               <div key={machine.machine_id} className="checklist-card card">
