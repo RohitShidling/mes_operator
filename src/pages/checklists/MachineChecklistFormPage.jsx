@@ -35,6 +35,11 @@ const normalizeStatusToChecked = (status) => {
   return ['COMPLETED', 'DONE', 'CHECKED', 'OK', 'PASS'].includes(value);
 };
 
+const resolveItemChecked = (item = {}) => {
+  if (typeof item.checked === 'boolean') return item.checked;
+  return normalizeStatusToChecked(item.status);
+};
+
 const checkpointIcon = (checkpoint = '') => {
   const key = checkpoint.toLowerCase();
   if (key.includes('clean')) return FaBroom;
@@ -91,7 +96,7 @@ export default function MachineChecklistFormPage() {
         const genericItems = normalizeChecklistItems(genericRes.value);
         setRows(genericItems.map((item) => ({
           ...item,
-          local_status: normalizeStatusToChecked(item.status),
+          local_status: resolveItemChecked(item),
           local_comments: item.comments || '',
         })));
       }
@@ -113,7 +118,7 @@ export default function MachineChecklistFormPage() {
       ]);
       setRows(items.map((item) => ({
         ...item,
-        local_status: normalizeStatusToChecked(item.status),
+        local_status: resolveItemChecked(item),
         local_comments: item.comments || '',
       })));
       setCellInchargeName(machineCellInchargeName);
@@ -173,7 +178,7 @@ export default function MachineChecklistFormPage() {
         cell_incharge_name: cellInchargeName.trim(),
         items: rows.map((row) => ({
           ...(row.id ? { id: row.id } : { checkpoint: row.checkpoint }),
-          status: row.local_status ? 'DONE' : 'NOT_DONE',
+          checked: Boolean(row.local_status),
           comments: row.local_comments || '',
         })),
       };

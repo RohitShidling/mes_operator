@@ -51,6 +51,9 @@ export const operatorApi = {
   getMyMachines: () =>
     api.get('/operator/my-machines'),
 
+  deleteMyMachine: (machineId) =>
+    api.delete(`/operator/machines/${machineId}`),
+
   getMachineOperators: (machineId) =>
     api.get(`/operator/machine-operators/${machineId}`),
 
