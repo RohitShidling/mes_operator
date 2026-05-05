@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useSocket } from '../../context/SocketContext';
 import { operatorApi } from '../../api/operatorApi';
 import { machineApi } from '../../api/machineApi';
@@ -6,17 +7,25 @@ import StatusBadge from '../../components/common/StatusBadge';
 import LoadingSpinner from '../../components/common/LoadingSpinner';
 import EmptyState from '../../components/common/EmptyState';
 import { getErrorMessage, bufferToImageUrl } from '../../utils/helpers';
-import { Monitor, RefreshCw, Search, Image as ImageIcon, Trash2 } from 'lucide-react';
+import { Monitor, Play, Pause, Square, RefreshCw, Zap, Search, Image as ImageIcon, Trash2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import './MachineChecklistPage.css';
 
+const STATUS_OPTIONS = [
+  { value: 'RUNNING', label: 'Running', icon: Play, color: 'var(--color-success)' },
+  { value: 'MAINTENANCE', label: 'Maintenance', icon: Pause, color: 'var(--color-warning)' },
+  { value: 'NOT_STARTED', label: 'Not Started', icon: Square, color: 'var(--color-text-muted)' },
+];
+
 export default function MachineChecklistPage() {
+  const navigate = useNavigate();
   const { subscribe } = useSocket();
   const [loading, setLoading] = useState(true);
   const [machines, setMachines] = useState([]);
   const [allMachineDetails, setAllMachineDetails] = useState([]);
   const [productionCounts, setProductionCounts] = useState({});
-  const [deleting, setDeleting] = useState({});
+  const [updating, setUpdating] = useState({});
+  const [ingesting, setIngesting] = useState({});
   const [filter, setFilter] = useState('ALL');
   const [search, setSearch] = useState('');
 
@@ -81,19 +90,78 @@ export default function MachineChecklistPage() {
     return () => unsubs.forEach((u) => u?.());
   }, [subscribe]);
 
-  const handleDeleteMachine = async (machine) => {
-    const confirmed = window.confirm(`Remove machine "${machine.machine_name}" (${machine.machine_id}) from your machines?`);
-    if (!confirmed) return;
-
-    setDeleting((prev) => ({ ...prev, [machine.machine_id]: true }));
+  const handleStatusChange = async (machineId, newStatus) => {
+    setUpdating((prev) => ({ ...prev, [machineId]: true }));
     try {
-      await operatorApi.deleteMyMachine(machine.machine_id);
-      toast.success('Machine removed for operator');
-      setMachines((prev) => prev.filter((m) => m.machine_id !== machine.machine_id));
+      await operatorApi.updateMachineStatus(machineId, newStatus);
+      toast.success(`Machine status updated to ${newStatus.replace(/_/g, ' ')}`);
+      fetchChecklist();
     } catch (err) {
       toast.error(getErrorMessage(err));
     } finally {
-      setDeleting((prev) => ({ ...prev, [machine.machine_id]: false }));
+      setUpdating((prev) => ({ ...prev, [machineId]: false }));
+    }
+  };
+
+  // Use ingest_path (NOT machine_id) to hit POST /api/ingest/<ingest_path>
+  // Only allowed when machine is RUNNING
+  const handleIngest = async (machine) => {
+    // Block if machine is not running
+    if (machine.status !== 'RUNNING') {
+      toast.error('Machine must be RUNNING to add production count.');
+      return;
+    }
+
+    // Find the ingest_path from allMachineDetails or from machine object
+    const fullMachine = allMachineDetails.find((m) => m.machine_id === machine.machine_id);
+    const ingestPath = fullMachine?.ingest_path || machine.ingest_path;
+
+    if (!ingestPath) {
+      toast.error('Ingest path not found. Please check machine configuration.');
+      return;
+    }
+
+    // Remove leading slash to get the path ID
+    const pathId = ingestPath.replace(/^\//, '');
+
+    setIngesting((prev) => ({ ...prev, [machine.machine_id]: true }));
+    try {
+      await machineApi.ingestData(pathId);
+      toast.success(`Production +1 for ${machine.machine_name}`);
+      fetchChecklist();
+    } catch (err) {
+      toast.error(getErrorMessage(err));
+    } finally {
+      setIngesting((prev) => ({ ...prev, [machine.machine_id]: false }));
+    }
+  };
+
+  const handleDeleteMachine = async (machineId, machineName) => {
+    const confirmed = window.confirm(`Delete machine assignment for ${machineName || machineId}?`);
+    if (!confirmed) return;
+
+    setUpdating((prev) => ({ ...prev, [machineId]: true }));
+    try {
+      try {
+        await operatorApi.removeMyMachine(machineId);
+      } catch (primaryErr) {
+        const status = primaryErr?.response?.status;
+        const message = String(primaryErr?.response?.data?.message || '').toLowerCase();
+        const isRouteMissing = status === 404 && message.includes('route');
+
+        if (isRouteMissing) {
+          await operatorApi.unassignFromMachine(machineId);
+        } else {
+          throw primaryErr;
+        }
+      }
+
+      toast.success(`Machine removed: ${machineName || machineId}`);
+      fetchChecklist();
+    } catch (err) {
+      toast.error(getErrorMessage(err));
+    } finally {
+      setUpdating((prev) => ({ ...prev, [machineId]: false }));
     }
   };
 
@@ -112,7 +180,7 @@ export default function MachineChecklistPage() {
       <div className="page-header">
         <div>
           <h1 className="page-title">Machines</h1>
-          <p className="page-subtitle">View assigned machines and remove machine assignment</p>
+          <p className="page-subtitle">View and update machine statuses, track production</p>
         </div>
         <button className="btn btn-secondary" onClick={fetchChecklist}>
           <RefreshCw size={16} />
@@ -254,13 +322,36 @@ export default function MachineChecklistPage() {
                   </div>
                 </div>
 
+                {/* Status Actions */}
+                <div className="checklist-actions">
+                  {STATUS_OPTIONS.map((opt) => (
+                    <button
+                      key={opt.value}
+                      className={`checklist-action-btn ${machine.status === opt.value ? 'checklist-action-active' : ''}`}
+                      onClick={() => handleStatusChange(machine.machine_id, opt.value)}
+                      disabled={machine.status === opt.value || updating[machine.machine_id]}
+                      style={{ '--action-color': opt.color }}
+                    >
+                      <opt.icon size={14} />
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+
+                <button
+                  className="btn btn-ghost btn-sm w-full mt-2"
+                  onClick={() => navigate(`/machines/${machine.machine_id}`)}
+                >
+                  View Details →
+                </button>
                 <button
                   className="btn btn-danger btn-sm w-full mt-2"
-                  onClick={() => handleDeleteMachine(machine)}
-                  disabled={deleting[machine.machine_id]}
+                  onClick={() => handleDeleteMachine(machine.machine_id, machine.machine_name)}
+                  disabled={updating[machine.machine_id]}
+                  title="Delete machine assignment"
                 >
                   <Trash2 size={14} />
-                  {deleting[machine.machine_id] ? 'Removing...' : 'Delete'}
+                  {updating[machine.machine_id] ? 'Deleting...' : 'Delete'}
                 </button>
               </div>
             );

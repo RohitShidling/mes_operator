@@ -51,14 +51,14 @@ export const operatorApi = {
   getMyMachines: () =>
     api.get('/operator/my-machines'),
 
-  deleteMyMachine: (machineId) =>
-    api.delete(`/operator/machines/${machineId}`),
-
   getMachineOperators: (machineId) =>
     api.get(`/operator/machine-operators/${machineId}`),
 
   getAllAssignments: () =>
     api.get('/operator/assignments'),
+
+  removeMyMachine: (machineId) =>
+    api.delete(`/operator/machines/${machineId}`),
 
   unassignFromMachine: (machineId) =>
     api.delete(`/operator/assign/${machineId}`),

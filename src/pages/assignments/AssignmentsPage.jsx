@@ -7,7 +7,7 @@ import LoadingSpinner from '../../components/common/LoadingSpinner';
 import EmptyState from '../../components/common/EmptyState';
 import ConfirmModal from '../../components/common/ConfirmModal';
 import { getErrorMessage, formatDateTime, bufferToImageUrl } from '../../utils/helpers';
-import { Users, Plus, X, Link2, Unlink, RefreshCw, Monitor, Image as ImageIcon, AlertTriangle, Upload } from 'lucide-react';
+import { Plus, X, Link2, RefreshCw, Monitor, Image as ImageIcon, AlertTriangle, Upload, Trash2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 export default function AssignmentsPage() {
@@ -95,7 +95,21 @@ export default function AssignmentsPage() {
   const handleUnassign = async () => {
     setSubmitting(true);
     try {
-      await operatorApi.unassignFromMachine(selectedMachineId);
+      try {
+        // Preferred API: DELETE /api/operator/machines/:machineId
+        await operatorApi.removeMyMachine(selectedMachineId);
+      } catch (primaryErr) {
+        const status = primaryErr?.response?.status;
+        const message = String(primaryErr?.response?.data?.message || '').toLowerCase();
+        const isRouteMissing = status === 404 && message.includes('route');
+
+        // Backward compatibility for environments still on old backend endpoint
+        if (isRouteMissing) {
+          await operatorApi.unassignFromMachine(selectedMachineId);
+        } else {
+          throw primaryErr;
+        }
+      }
       toast.success('Unassigned from machine');
       setShowUnassignModal(false);
       setSelectedMachineId('');
@@ -307,6 +321,16 @@ export default function AssignmentsPage() {
                   {/* Action Buttons */}
                   <div style={{ display: 'flex', gap: 'var(--space-2)', flexWrap: 'wrap' }}>
                     <button
+                      className="btn btn-danger btn-sm"
+                      onClick={() => {
+                        setSelectedMachineId(m.machine_id);
+                        setShowUnassignModal(true);
+                      }}
+                      title="Delete machine assignment"
+                    >
+                      <Trash2 size={14} /> Delete
+                    </button>
+                    <button
                       className="btn btn-ghost btn-sm"
                       style={{ flex: 1 }}
                       onClick={() => navigate(`/machines/${m.machine_id}`)}
@@ -319,15 +343,6 @@ export default function AssignmentsPage() {
                       onClick={() => openRejectModal(m)}
                     >
                       <AlertTriangle size={14} /> Raise Rejection
-                    </button>
-                    <button
-                      className="btn btn-danger btn-sm"
-                      onClick={() => {
-                        setSelectedMachineId(m.machine_id);
-                        setShowUnassignModal(true);
-                      }}
-                    >
-                      <Unlink size={14} />
                     </button>
                   </div>
 
