@@ -5,6 +5,7 @@ import { workOrderApi } from '../../api/workOrderApi';
 import { workflowApi } from '../../api/workflowApi';
 import { machineApi } from '../../api/machineApi';
 import { operatorApi } from '../../api/operatorApi';
+import { checklistApi } from '../../api/checklistApi';
 import StatusBadge from '../../components/common/StatusBadge';
 import LoadingSpinner from '../../components/common/LoadingSpinner';
 import ConfirmModal from '../../components/common/ConfirmModal';
@@ -73,12 +74,13 @@ export default function WorkOrderDetailPage() {
 
   const fetchData = useCallback(async () => {
     try {
-      const [woRes, machRes, wfRes, rejRes, allMachRes] = await Promise.allSettled([
+      const [woRes, machRes, wfRes, rejRes, allMachRes, checklistRes] = await Promise.allSettled([
         workOrderApi.getById(workOrderId),
         workOrderApi.getMachines(workOrderId),
         workflowApi.getWorkflow(workOrderId),
         workOrderApi.getRejections(workOrderId),
         machineApi.getAll(),
+        checklistApi.getChecklistOverview(workOrderId),
       ]);
 
       if (woRes.status === 'fulfilled') setWorkOrder(woRes.value.data.data || woRes.value.data);
@@ -99,6 +101,27 @@ export default function WorkOrderDetailPage() {
         } else if (Array.isArray(raw)) {
           m = raw;
         }
+        
+        // Merge checklist status from checklistRes if available
+        if (checklistRes.status === 'fulfilled') {
+          const checklistData = checklistRes.value.data?.data || checklistRes.value.data || {};
+          const machinesWithChecklist = checklistData.machines || [];
+          
+          // Create a map of checklist status by machine_id
+          const checklistMap = {};
+          machinesWithChecklist.forEach((machine) => {
+            if (machine.machine_id) {
+              checklistMap[machine.machine_id] = machine.checklist_status;
+            }
+          });
+          
+          // Update machines with correct checklist_status
+          m = m.map((machine) => ({
+            ...machine,
+            checklist_status: checklistMap[machine.machine_id] || machine.checklist_status || 'NOT_STARTED',
+          }));
+        }
+        
         console.log('[WorkOrderDetail] Machines response:', raw, '=> extracted:', m);
         setMachines(m);
 
@@ -565,7 +588,12 @@ export default function WorkOrderDetailPage() {
                           <span className="checklist-machine-id">{m.machine_id}</span>
                         </div>
                       </div>
-                      <StatusBadge status={m.status} />
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)', alignItems: 'flex-end' }}>
+                        <StatusBadge status={m.status} />
+                        {m.checklist_status && (
+                          <StatusBadge status={m.checklist_status} />
+                        )}
+                      </div>
                     </div>
 
                     {/* Machine Image */}

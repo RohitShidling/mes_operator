@@ -14,11 +14,25 @@ export const operatorApi = {
       headers: { 'Content-Type': 'multipart/form-data' },
     }),
 
+  reportRejectionByMachine: (machineId, formData) =>
+    api.post(`/operator/rejections/${machineId}`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    }),
+
   getAllRejections: () =>
     api.get('/operator/rejections'),
 
   getRejectionsByMachine: (machineId) =>
     api.get(`/operator/rejections/machine/${machineId}`),
+
+  getPendingReworkByMachine: (machineId) =>
+    api.get(`/operator/rejections/machine/${machineId}/rework/pending`),
+
+  getReworkReasons: () =>
+    api.get('/operator/rejections/rework-reasons'),
+
+  markReworkDone: (rejectionId, data) =>
+    api.patch(`/operator/rejections/${rejectionId}/rework`, data),
 
   // Skills
   updateSkills: (data) =>

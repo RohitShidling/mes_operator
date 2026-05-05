@@ -20,7 +20,7 @@ const navItems = [
   { path: '/machine-checklist', icon: ClipboardCheck, label: 'Machine Checklist' },
   { path: '/work-orders', icon: ClipboardList, label: 'Work Orders' },
   { path: '/assignments', icon: Users, label: 'My Assignments' },
-  { path: '/rejections', icon: AlertOctagon, label: 'Rejections' },
+  { path: '/rejections', icon: AlertOctagon, label: 'Rejection & Rework' },
   { path: '/breakdowns', icon: ShieldAlert, label: 'Breakdowns' },
   { path: '/skills', icon: Wrench, label: 'My Skills' },
 ];
