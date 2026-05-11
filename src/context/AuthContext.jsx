@@ -102,7 +102,7 @@ export function AuthProvider({ children }) {
       }
 
       toast.error(message);
-      return { success: false, message };
+      return { success: false, message, statusCode: err.response?.status };
     }
   }, []);
 
@@ -146,7 +146,7 @@ export function AuthProvider({ children }) {
       }
 
       toast.error(message);
-      return { success: false, message };
+      return { success: false, message, statusCode: err.response?.status };
     }
   }, []);
 

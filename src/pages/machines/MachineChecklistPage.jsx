@@ -50,7 +50,12 @@ export default function MachineChecklistPage() {
       // Merge allMachines data (machine_image, ingest_path, current_run) into each checklist item
       const merged = (Array.isArray(checklistData) ? checklistData : []).map((m) => {
         const detail = allArr.find((d) => d.machine_id === m.machine_id);
-        return detail ? { ...detail, ...m } : m;
+        if (!detail) return m;
+        return {
+          ...m,
+          ...detail,
+          status: detail.status ?? m.status,
+        };
       });
       setMachines(merged);
 

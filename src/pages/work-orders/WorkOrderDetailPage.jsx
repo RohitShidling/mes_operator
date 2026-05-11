@@ -35,6 +35,7 @@ export default function WorkOrderDetailPage() {
   const [workflow, setWorkflow] = useState(null);
   const [rejections, setRejections] = useState([]);
   const [productionCounts, setProductionCounts] = useState({});
+  const [woMetrics, setWoMetrics] = useState(null);
   const [updatingStep, setUpdatingStep] = useState({});
   const [updatingWoStatus, setUpdatingWoStatus] = useState(false);
 
@@ -74,13 +75,14 @@ export default function WorkOrderDetailPage() {
 
   const fetchData = useCallback(async () => {
     try {
-      const [woRes, machRes, wfRes, rejRes, allMachRes, checklistRes] = await Promise.allSettled([
+      const [woRes, machRes, wfRes, rejRes, allMachRes, checklistRes, metricsRes] = await Promise.allSettled([
         workOrderApi.getById(workOrderId),
         workOrderApi.getMachines(workOrderId),
         workflowApi.getWorkflow(workOrderId),
         workOrderApi.getRejections(workOrderId),
         machineApi.getAll(),
         checklistApi.getChecklistOverview(workOrderId),
+        workOrderApi.getProductionMetrics(workOrderId),
       ]);
 
       if (woRes.status === 'fulfilled') setWorkOrder(woRes.value.data.data || woRes.value.data);
@@ -146,6 +148,12 @@ export default function WorkOrderDetailPage() {
           setWorkOrder((prev) => prev ? { ...prev, total_rejected: inner.work_order.total_rejected } : prev);
         }
         setRejections(r);
+      }
+      if (metricsRes.status === 'fulfilled') {
+        const m = metricsRes.value.data?.data || metricsRes.value.data || null;
+        setWoMetrics(m);
+      } else {
+        setWoMetrics(null);
       }
       if (allMachRes.status === 'fulfilled') {
         const raw = allMachRes.value.data;
@@ -413,10 +421,13 @@ export default function WorkOrderDetailPage() {
   if (loading) return <LoadingSpinner text="Loading work order details..." />;
   if (!workOrder) return <div className="page-container"><p>Work order not found.</p></div>;
 
-  const progress = calcPercentage(workOrder.total_produced || workOrder.produced_count || 0, workOrder.target);
+  const producedForProgress = woMetrics?.produced ?? workOrder.total_produced ?? workOrder.produced_count ?? 0;
+  const targetForProgress = woMetrics?.target ?? workOrder.target ?? 0;
+  const progress = calcPercentage(producedForProgress, targetForProgress);
   const steps = workflow?.steps || workflow?.workflow_steps || [];
   // total_rejected comes from the work_order object in the rejections API response
-  const totalRejections = workOrder.total_rejected ?? (Array.isArray(rejections) ? rejections.reduce((sum, r) => sum + (Number(r.total_rejected) || r.rejected_count || 0), 0) : 0);
+  const totalRejections = woMetrics?.rejected ?? workOrder.total_rejected ?? (Array.isArray(rejections) ? rejections.reduce((sum, r) => sum + (Number(r.total_rejected) || r.rejected_count || 0), 0) : 0);
+  const totalAccepted = woMetrics?.accepted ?? Math.max(0, producedForProgress - totalRejections);
 
   // Available machines (not already assigned)
   const assignedMachineIds = machines.map((m) => m.machine_id);
@@ -436,7 +447,7 @@ export default function WorkOrderDetailPage() {
             <h1 className="page-title">{workOrder.work_order_name}</h1>
             <p className="page-subtitle">
               {workOrder.work_order_id || workOrderId}
-              {workOrder.targeted_end_date && ` • Target End: ${formatDate(workOrder.targeted_end_date)}`}
+              {(woMetrics?.targeted_end_date || workOrder.targeted_end_date) && ` • Target End: ${formatDate(woMetrics?.targeted_end_date || workOrder.targeted_end_date)}`}
             </p>
           </div>
         </div>
@@ -491,20 +502,27 @@ export default function WorkOrderDetailPage() {
             <div className="stat-icon stat-icon-blue"><Target size={20} /></div>
             <div className="stat-info">
               <span className="stat-label">Target</span>
-              <span className="stat-value">{workOrder.target}</span>
+              <span className="stat-value">{targetForProgress}</span>
             </div>
           </div>
           <div className="stat-card">
-            <div className="stat-icon stat-icon-green"><Hash size={20} /></div>
+            <div className="stat-icon stat-icon-green"><PlayCircle size={20} /></div>
             <div className="stat-info">
-              <span className="stat-label">Produced</span>
-              <span className="stat-value">{workOrder.total_produced || workOrder.produced_count || 0}</span>
+              <span className="stat-label">Production</span>
+              <span className="stat-value">{producedForProgress}</span>
+            </div>
+          </div>
+          <div className="stat-card">
+            <div className="stat-icon stat-icon-yellow"><CheckCircle size={20} /></div>
+            <div className="stat-info">
+              <span className="stat-label">Acceptance</span>
+              <span className="stat-value">{totalAccepted}</span>
             </div>
           </div>
           <div className="stat-card">
             <div className="stat-icon stat-icon-red"><AlertTriangle size={20} /></div>
             <div className="stat-info">
-              <span className="stat-label">Total Rejections</span>
+              <span className="stat-label">Rejections</span>
               <span className="stat-value">{totalRejections}</span>
             </div>
           </div>

@@ -22,6 +22,10 @@ export const workOrderApi = {
   getRejections: (workOrderId) =>
     api.get(`/work-orders/${workOrderId}/rejections`),
 
+  /** Production, acceptance, rejection, target date (aggregated) */
+  getProductionMetrics: (workOrderId) =>
+    api.get(`/work-orders/${workOrderId}/production-metrics`),
+
   // Operator can update work order status (PENDING, IN_PROGRESS, NOT_STARTED)
   updateStatus: (workOrderId, status) =>
     api.put(`/work-orders/${workOrderId}`, { status }),

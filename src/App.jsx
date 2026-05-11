@@ -22,7 +22,6 @@ import WorkOrderDetailPage from './pages/work-orders/WorkOrderDetailPage';
 import RejectionsPage from './pages/rejections/RejectionsPage';
 import BreakdownsPage from './pages/breakdowns/BreakdownsPage';
 import SkillsPage from './pages/skills/SkillsPage';
-import AssignmentsPage from './pages/assignments/AssignmentsPage';
 
 // Auth Route Guard - redirects to dashboard if already logged in
 function AuthRoute({ children }) {
@@ -81,7 +80,6 @@ function AppRoutes() {
         <Route path="rejections" element={<RejectionsPage />} />
         <Route path="breakdowns" element={<BreakdownsPage />} />
         <Route path="skills" element={<SkillsPage />} />
-        <Route path="assignments" element={<AssignmentsPage />} />
       </Route>
 
       {/* Catch all - redirect to dashboard */}

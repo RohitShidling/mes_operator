@@ -2,36 +2,23 @@ import { useState, useEffect } from 'react';
 import { useSocket } from '../../context/SocketContext';
 import { operatorApi } from '../../api/operatorApi';
 import { machineApi } from '../../api/machineApi';
-import StatusBadge from '../../components/common/StatusBadge';
+import { notificationApi } from '../../api/notificationApi';
 import LoadingSpinner from '../../components/common/LoadingSpinner';
 import EmptyState from '../../components/common/EmptyState';
-import { getErrorMessage, formatDateTime, getSeverityClass } from '../../utils/helpers';
-import { ShieldAlert, RefreshCw } from 'lucide-react';
-import {
-  FaToolbox,
-  FaCog,
-  FaCalendarCheck,
-  FaClipboardCheck,
-  FaHourglassHalf,
-  FaBolt,
-  FaUserSlash,
-  FaEllipsisH,
-} from 'react-icons/fa';
+import StatusBadge from '../../components/common/StatusBadge';
+import { getErrorMessage, formatDateTime } from '../../utils/helpers';
+import { RefreshCw, ShieldAlert } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 const SEVERITY_LEVELS = ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'];
-const BD_STATUSES = ['REPORTED', 'ACKNOWLEDGED', 'IN_REPAIR', 'RESOLVED'];
-const FALLBACK_BREAKDOWN_REASONS = [
-  'TOOL_CHANGER',
-  'MACHINE_BREAKDOWN',
-  'MONTHLY_PM',
-  'QC_ISSUES',
-  'WAITING_FOR_RM',
-  'POWER_CUT',
-  'SHIFT_CHANGE',
-  'NO_OPERATOR',
-  'OTHERS',
-];
+const BD_STATUSES = ['REPORTED', 'IN_PROGRESS', 'RESOLVED'];
+
+const getSeverityClass = (severity) => {
+  const s = String(severity || '').toUpperCase();
+  if (s === 'LOW') return 'severity-low';
+  if (s === 'MEDIUM') return 'severity-medium';
+  return 'severity-high';
+};
 
 const toDateTimeLocalValue = (date = new Date()) => {
   const tzOffset = date.getTimezoneOffset() * 60000;
@@ -45,27 +32,117 @@ const toApiDateTime = (date) => {
 
 const reasonLabel = (value) => value?.replaceAll('_', ' ') || '';
 
-const REASON_ICON_MAP = {
-  TOOL_CHANGER: FaToolbox,
-  MACHINE_BREAKDOWN: FaCog,
-  MONTHLY_PM: FaCalendarCheck,
-  QC_ISSUES: FaClipboardCheck,
-  WAITING_FOR_RM: FaHourglassHalf,
-  POWER_CUT: FaBolt,
-  SHIFT_CHANGE: FaUserSlash,
-  NO_OPERATOR: FaUserSlash,
-  OTHERS: FaEllipsisH,
-};
+/* ── Inline SVG icons for breakdown reasons ── */
+const IconToolChange = () => (
+  <svg viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <line x1="14" y1="50" x2="42" y2="22" stroke="#333" strokeWidth="5" strokeLinecap="round"/>
+    <circle cx="46" cy="18" r="8" stroke="#333" strokeWidth="4" fill="none"/>
+    <line x1="10" y1="54" x2="14" y2="50" stroke="#333" strokeWidth="5" strokeLinecap="round"/>
+    <path d="M30 12 L20 22 L32 34 L42 24" stroke="#555" strokeWidth="3.5" fill="none" strokeLinecap="round" strokeLinejoin="round"/>
+    <rect x="8" y="46" width="6" height="12" rx="2" transform="rotate(-45 8 46)" fill="#333"/>
+  </svg>
+);
+
+const IconMachineBreakdown = () => (
+  <svg viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <circle cx="32" cy="32" r="20" stroke="#333" strokeWidth="4"/>
+    <path d="M32 12 C20 20 20 44 32 52 C44 44 44 20 32 12Z" stroke="#555" strokeWidth="3" fill="none"/>
+    <line x1="12" y1="32" x2="52" y2="32" stroke="#333" strokeWidth="3"/>
+    <path d="M32 44 L28 54 L32 52 L36 54 Z" fill="#e74c3c"/>
+    <circle cx="32" cy="38" r="3" fill="#e74c3c"/>
+  </svg>
+);
+
+const IconMonthlyPM = () => (
+  <svg viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <circle cx="28" cy="20" r="10" stroke="#333" strokeWidth="3.5" fill="none"/>
+    <path d="M10 54 C10 42 46 42 46 54" stroke="#333" strokeWidth="3.5" strokeLinecap="round" fill="none"/>
+    <rect x="38" y="24" width="18" height="24" rx="2" stroke="#555" strokeWidth="3" fill="none"/>
+    <line x1="42" y1="31" x2="52" y2="31" stroke="#555" strokeWidth="2.5" strokeLinecap="round"/>
+    <line x1="42" y1="36" x2="52" y2="36" stroke="#555" strokeWidth="2.5" strokeLinecap="round"/>
+    <polyline points="42,41 44,43 48,39" stroke="#27ae60" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/>
+  </svg>
+);
+
+const IconQCIssues = () => (
+  <svg viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <rect x="14" y="10" width="28" height="36" rx="3" stroke="#333" strokeWidth="3.5" fill="none"/>
+    <line x1="20" y1="20" x2="36" y2="20" stroke="#555" strokeWidth="2.5" strokeLinecap="round"/>
+    <line x1="20" y1="27" x2="36" y2="27" stroke="#555" strokeWidth="2.5" strokeLinecap="round"/>
+    <line x1="20" y1="34" x2="30" y2="34" stroke="#555" strokeWidth="2.5" strokeLinecap="round"/>
+    <circle cx="46" cy="46" r="12" fill="#e74c3c"/>
+    <line x1="46" y1="39" x2="46" y2="47" stroke="white" strokeWidth="3" strokeLinecap="round"/>
+    <circle cx="46" cy="51" r="1.5" fill="white"/>
+  </svg>
+);
+
+const IconWaitingRM = () => (
+  <svg viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <circle cx="32" cy="28" r="14" stroke="#333" strokeWidth="3.5" fill="none"/>
+    <polyline points="32,20 32,28 38,32" stroke="#333" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"/>
+    <rect x="10" y="44" width="8" height="4" rx="1" fill="#555"/>
+    <rect x="20" y="40" width="8" height="8" rx="1" fill="#555"/>
+    <rect x="30" y="36" width="8" height="12" rx="1" fill="#555"/>
+    <rect x="40" y="42" width="8" height="6" rx="1" fill="#555"/>
+  </svg>
+);
+
+const IconPowerCut = () => (
+  <svg viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <circle cx="32" cy="32" r="20" stroke="#333" strokeWidth="3.5" fill="none"/>
+    <line x1="20" y1="20" x2="44" y2="44" stroke="#e74c3c" strokeWidth="4" strokeLinecap="round"/>
+    <line x1="44" y1="20" x2="20" y2="44" stroke="#e74c3c" strokeWidth="4" strokeLinecap="round"/>
+  </svg>
+);
+
+const IconShiftChange = () => (
+  <svg viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <circle cx="32" cy="20" r="9" stroke="#333" strokeWidth="3.5" fill="none"/>
+    <path d="M14 52 C14 38 50 38 50 52" stroke="#333" strokeWidth="3.5" strokeLinecap="round" fill="none"/>
+    <circle cx="32" cy="32" r="24" stroke="#e74c3c" strokeWidth="4" fill="none"/>
+    <line x1="12" y1="12" x2="52" y2="52" stroke="#e74c3c" strokeWidth="4" strokeLinecap="round"/>
+  </svg>
+);
+
+const IconNoOperator = () => (
+  <svg viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <circle cx="32" cy="20" r="9" stroke="#333" strokeWidth="3.5" fill="none"/>
+    <path d="M14 52 C14 38 50 38 50 52" stroke="#333" strokeWidth="3.5" strokeLinecap="round" fill="none"/>
+    <circle cx="32" cy="32" r="24" stroke="#e74c3c" strokeWidth="4" fill="none"/>
+    <line x1="12" y1="12" x2="52" y2="52" stroke="#e74c3c" strokeWidth="4" strokeLinecap="round"/>
+  </svg>
+);
+
+const IconOther = () => (
+  <svg viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <circle cx="32" cy="32" r="22" stroke="#333" strokeWidth="3.5" fill="none"/>
+    <line x1="20" y1="24" x2="44" y2="24" stroke="#333" strokeWidth="3" strokeLinecap="round"/>
+    <line x1="20" y1="32" x2="44" y2="32" stroke="#333" strokeWidth="3" strokeLinecap="round"/>
+    <line x1="20" y1="40" x2="36" y2="40" stroke="#333" strokeWidth="3" strokeLinecap="round"/>
+  </svg>
+);
+
+const BREAKDOWN_REASONS = [
+  { id: 'TOOL_CHANGER', label: 'Tool changer', Icon: IconToolChange },
+  { id: 'MACHINE_BREAKDOWN', label: 'Machine Breakdown', Icon: IconMachineBreakdown },
+  { id: 'MONTHLY_PM', label: 'Monthly PM', Icon: IconMonthlyPM },
+  { id: 'QC_ISSUES', label: 'QC Issues- correction', Icon: IconQCIssues },
+  { id: 'WAITING_FOR_RM', label: 'Waiting for RM', Icon: IconWaitingRM },
+  { id: 'POWER_CUT', label: 'Power Cut', Icon: IconPowerCut },
+  { id: 'SHIFT_CHANGE', label: 'Shift change - No operator', Icon: IconShiftChange },
+  { id: 'NO_OPERATOR', label: 'No Operator', Icon: IconNoOperator },
+  { id: 'OTHERS', label: 'Other', Icon: IconOther },
+];
 
 export default function BreakdownsPage() {
-  const { subscribe } = useSocket();
+  const { subscribe, emit } = useSocket();
   const [loading, setLoading] = useState(true);
   const [breakdowns, setBreakdowns] = useState([]);
   const [machines, setMachines] = useState([]);
   const [submitting, setSubmitting] = useState(false);
   const [updating, setUpdating] = useState({});
   const [tab, setTab] = useState('active');
-  const [breakdownReasons, setBreakdownReasons] = useState(FALLBACK_BREAKDOWN_REASONS);
+  const [breakdownReasons, setBreakdownReasons] = useState(BREAKDOWN_REASONS);
   const [formData, setFormData] = useState({
     machine_id: '',
     breakdown_reason: 'TOOL_CHANGER',
@@ -75,10 +152,10 @@ export default function BreakdownsPage() {
     severity: 'MEDIUM',
   });
 
-  const fetchData = async () => {
+  const fetchData = async (currentTab = tab) => {
     try {
       const [bdRes, machRes] = await Promise.allSettled([
-        tab === 'active' ? operatorApi.getActiveBreakdowns() : operatorApi.getAllBreakdowns(),
+        currentTab === 'active' ? operatorApi.getActiveBreakdowns() : operatorApi.getAllBreakdowns(),
         machineApi.getAll(),
       ]);
       if (bdRes.status === 'fulfilled') {
@@ -98,7 +175,7 @@ export default function BreakdownsPage() {
 
   useEffect(() => {
     setLoading(true);
-    fetchData();
+    fetchData(tab);
   }, [tab]);
 
   useEffect(() => {
@@ -115,11 +192,19 @@ export default function BreakdownsPage() {
         const response = await operatorApi.getBreakdownReasons();
         const data = response?.data?.data || response?.data || [];
         if (Array.isArray(data) && data.length > 0) {
-          setBreakdownReasons(data);
+          // Map API string reasons to icon objects
+          const mappedReasons = data.map((r) => {
+            if (typeof r === 'string') {
+              const found = BREAKDOWN_REASONS.find((br) => br.id === r);
+              return found || { id: r, label: r.replace(/_/g, ' '), Icon: IconOther };
+            }
+            return r;
+          });
+          setBreakdownReasons(mappedReasons);
         }
       } catch (error) {
         // Keep fixed fallback reasons if API is unavailable.
-        setBreakdownReasons(FALLBACK_BREAKDOWN_REASONS);
+        setBreakdownReasons(BREAKDOWN_REASONS);
       }
     };
 
@@ -152,11 +237,41 @@ export default function BreakdownsPage() {
         comment: formData.comment?.trim() || '',
         severity: formData.severity,
       };
-      await operatorApi.reportBreakdownByMachine(formData.machine_id, payload);
+      const response = await operatorApi.reportBreakdownByMachine(formData.machine_id, payload);
       toast.success('Breakdown reported! Machine set to MAINTENANCE.');
+
+      // Create notification for breakdown
+      const machine = machines.find((m) => m.machine_id === formData.machine_id);
+      const machineName = machine?.machine_name || formData.machine_id;
+      const breakdownReason = reasonLabel(formData.breakdown_reason);
+
+      try {
+        await notificationApi.create({
+          type: 'BREAKDOWN',
+          title: `Machine Breakdown: ${machineName}`,
+          message: `Machine ${machineName} (${formData.machine_id}) reported breakdown: ${breakdownReason}. Severity: ${formData.severity}`,
+          machine_id: formData.machine_id,
+          severity: formData.severity,
+          reason: formData.breakdown_reason,
+          breakdown_id: response?.data?.id || response?.data?.breakdown_id || null,
+        });
+
+        // Emit socket event for real-time notification
+        emit('breakdown:reported', {
+          machine_id: formData.machine_id,
+          machine_name: machineName,
+          reason: breakdownReason,
+          severity: formData.severity,
+          timestamp: new Date().toISOString(),
+        });
+      } catch (notifErr) {
+        // Don't fail if notification creation fails
+        console.error('Failed to create notification:', notifErr);
+      }
+
       setFormData({
         machine_id: '',
-        breakdown_reason: breakdownReasons[0] || 'TOOL_CHANGER',
+        breakdown_reason: 'TOOL_CHANGER',
         start_time: toDateTimeLocalValue(),
         end_time: toDateTimeLocalValue(),
         comment: '',
@@ -256,13 +371,13 @@ export default function BreakdownsPage() {
             <label style={{ display: 'block', marginBottom: 'var(--space-2)', fontWeight: 600 }}>Machine Breakdown Reasons *</label>
             <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))' }}>
               {breakdownReasons.map((reason) => {
-                const Icon = REASON_ICON_MAP[reason] || FaCog;
-                const isSelected = formData.breakdown_reason === reason;
+                const isSelected = formData.breakdown_reason === reason.id;
+                const Icon = reason.Icon;
                 return (
                   <button
-                    key={reason}
+                    key={reason.id}
                     type="button"
-                    onClick={() => setFormData((p) => ({ ...p, breakdown_reason: reason }))}
+                    onClick={() => setFormData((p) => ({ ...p, breakdown_reason: reason.id }))}
                     style={{
                       border: isSelected ? '2px solid var(--color-danger)' : '1px solid var(--color-border-primary)',
                       borderRadius: 'var(--radius-md)',
@@ -273,13 +388,15 @@ export default function BreakdownsPage() {
                       alignItems: 'center',
                       justifyContent: 'center',
                       gap: 'var(--space-2)',
-                      minHeight: '96px',
+                      minHeight: '120px',
                       cursor: 'pointer',
                     }}
                   >
-                    <Icon size={26} />
+                    <div style={{ width: '72px', height: '72px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      <Icon />
+                    </div>
                     <span style={{ fontSize: 'var(--font-size-xs)', textAlign: 'center', fontWeight: 600 }}>
-                      {reasonLabel(reason)}
+                      {reason.label}
                     </span>
                   </button>
                 );
