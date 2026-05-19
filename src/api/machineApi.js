@@ -29,4 +29,7 @@ export const machineApi = {
 
   stopMachine: (machineId) =>
     api.post(`/machines/${machineId}/stop`),
+
+  delete: (machineId) =>
+    api.delete(`/machines/${machineId}`),
 };

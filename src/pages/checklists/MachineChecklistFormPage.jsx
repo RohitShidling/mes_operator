@@ -8,6 +8,15 @@ import { ClipboardCheck, ImageOff } from 'lucide-react';
 import { FaCheckCircle } from 'react-icons/fa';
 import toast from 'react-hot-toast';
 import { getErrorMessage } from '../../utils/helpers';
+import { getCheckpointImageUrl } from '../../checklist/checklistCheckpointImages';
+
+const pickCheckpointLabel = (row = {}) =>
+  row.checkpoint
+  || row.checkpoint_name
+  || row.checkpoint_title
+  || row.name
+  || row.title
+  || '';
 
 const normalizeChecklistItems = (payload) => {
   const base = payload?.data?.data || payload?.data || [];
@@ -30,52 +39,6 @@ const resolveItemChecked = (item = {}) => {
   return normalizeStatusToChecked(item.status);
 };
 
-// Map checkpoint names to images in /img/ folder
-// Note: Hydraulic and Tool Mapping share the same icon
-const CHECKPOINT_IMAGES = {
-  // Cleanliness
-  'clearness': '/img/clearness.png',
-  'clean': '/img/clearness.png',
-  'cleanliness': '/img/clearness.png',
-  // Cooling (separate from hydraulic)
-  'cooling': '/img/cooling.png',
-  'coolant': '/img/cooling.png',
-  // Hydraulic - same as tool mapping
-  'hydraulic': '/img/tool_maping.png',
-  'hydraulics': '/img/tool_maping.png',
-  // Lubrication
-  'lubrication': '/img/lubrication.png',
-  'lubricant': '/img/lubrication.png',
-  'oil': '/img/lubrication.png',
-  // Safety
-  'safety': '/img/safety.png',
-  'safe': '/img/safety.png',
-  // Tool Mapping - same as hydraulic
-  'tool_maping': '/img/tool_maping.png',
-  'tool mapping': '/img/tool_maping.png',
-  'tool': '/img/tool_maping.png',
-  // Operation
-  'operation': '/img/op_2.jpg',
-  'op_2': '/img/op_2.jpg',
-  'op_8': '/img/op_8.png',
-  // Water Leakage - same as hydraulic/tool mapping
-  'water_leakage': '/img/tool_maping.png',
-  'water leakage': '/img/tool_maping.png',
-  'leakage': '/img/tool_maping.png',
-  'leak': '/img/tool_maping.png',
-};
-
-const getCheckpointImage = (checkpoint = '') => {
-  const key = checkpoint.toLowerCase().trim();
-  // Try exact match first
-  if (CHECKPOINT_IMAGES[key]) return CHECKPOINT_IMAGES[key];
-  // Try partial match
-  for (const [keyword, imagePath] of Object.entries(CHECKPOINT_IMAGES)) {
-    if (key.includes(keyword)) return imagePath;
-  }
-  return null;
-};
-
 const resolveOperatorName = (user) =>
   user?.operator_name || user?.name || user?.full_name || user?.username || user?.email || '';
 
@@ -88,6 +51,7 @@ export default function MachineChecklistFormPage() {
   const [rows, setRows] = useState([]);
   const [operatorName, setOperatorName] = useState(resolveOperatorName(user));
   const [cellInchargeName, setCellInchargeName] = useState('');
+  const [failedCheckpointImages, setFailedCheckpointImages] = useState(() => new Set());
 
   const selectedMachineLabel = useMemo(() => {
     const machine = machines.find((m) => m.machine_id === selectedMachine);
@@ -117,11 +81,15 @@ export default function MachineChecklistFormPage() {
         await loadChecklistForMachine(resolvedMachine);
       } else if (genericRes.status === 'fulfilled') {
         const genericItems = normalizeChecklistItems(genericRes.value);
-        setRows(genericItems.map((item) => ({
-          ...item,
-          local_status: resolveItemChecked(item),
-          local_comments: item.comments || '',
-        })));
+        setRows(genericItems.map((item) => {
+          const { image: _dbImage, ...itemWithoutImage } = item;
+          return {
+            ...itemWithoutImage,
+            local_status: resolveItemChecked(item),
+            local_comments: item.comments || '',
+          };
+        }));
+        setFailedCheckpointImages(new Set());
       }
     } catch (error) {
       toast.error(getErrorMessage(error));
@@ -139,16 +107,21 @@ export default function MachineChecklistFormPage() {
         responseData?.cell_incharge_name,
         ...items.map((item) => item?.cell_incharge_name),
       ]);
-      setRows(items.map((item) => ({
-        ...item,
-        local_status: resolveItemChecked(item),
-        local_comments: item.comments || '',
-      })));
+      setRows(items.map((item) => {
+        const { image: _dbImage, ...itemWithoutImage } = item;
+        return {
+          ...itemWithoutImage,
+          local_status: resolveItemChecked(item),
+          local_comments: item.comments || '',
+        };
+      }));
+      setFailedCheckpointImages(new Set());
       setCellInchargeName(machineCellInchargeName);
     } catch (error) {
       toast.error(getErrorMessage(error));
       setRows([]);
       setCellInchargeName('');
+      setFailedCheckpointImages(new Set());
     }
   };
 
@@ -165,6 +138,7 @@ export default function MachineChecklistFormPage() {
     setCellInchargeName('');
     if (!machineId) {
       setRows([]);
+      setFailedCheckpointImages(new Set());
       return;
     }
     setLoading(true);
@@ -200,7 +174,7 @@ export default function MachineChecklistFormPage() {
         operator_name: operatorName.trim(),
         cell_incharge_name: cellInchargeName.trim(),
         items: rows.map((row) => ({
-          ...(row.id ? { id: row.id } : { checkpoint: row.checkpoint }),
+          ...(row.id ? { id: row.id } : { checkpoint: pickCheckpointLabel(row) }),
           checked: Boolean(row.local_status),
           comments: row.local_comments || '',
         })),
@@ -286,56 +260,52 @@ export default function MachineChecklistFormPage() {
                 </tr>
               </thead>
               <tbody>
-                {rows.map((row, index) => (
-                  <tr key={row.id || `${row.checkpoint}-${index}`}>
-                      <td style={{ fontWeight: 600 }}>{row.checkpoint || '—'}</td>
+                {rows.map((row, index) => {
+                  const rowKey = String(row.id ?? `${pickCheckpointLabel(row)}-${index}`);
+                  const checkpointLabel = pickCheckpointLabel(row);
+                  const imagePath = getCheckpointImageUrl(checkpointLabel);
+                  const showImage = Boolean(imagePath) && !failedCheckpointImages.has(rowKey);
+                  return (
+                  <tr key={row.id || `${checkpointLabel}-${index}`}>
+                      <td style={{ fontWeight: 600 }}>{checkpointLabel || '—'}</td>
                       <td>{row.description || '—'}</td>
                       <td>{[row.specification, row.method].filter(Boolean).join(' / ') || '—'}</td>
                       <td>
-                        {(() => {
-                          const imagePath = getCheckpointImage(row.checkpoint);
-                          return imagePath ? (
-                            <div style={{
-                              width: '80px',
-                              height: '60px',
-                              borderRadius: 'var(--radius-md)',
-                              overflow: 'hidden',
-                              border: '1px solid var(--color-border)',
-                              display: 'flex',
-                              alignItems: 'center',
-                              justifyContent: 'center',
-                              background: 'var(--color-bg-tertiary)',
-                            }}>
-                              <img
-                                src={imagePath}
-                                alt={row.checkpoint}
-                                style={{
-                                  width: '100%',
-                                  height: '100%',
-                                  objectFit: 'contain',
-                                  padding: '2px',
-                                }}
-                                onError={(e) => {
-                                  e.target.style.display = 'none';
-                                  e.target.parentElement.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;width:100%;height:100%;"><svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:var(--color-text-muted)"><line x1="2" y1="2" x2="22" y2="22"></line><path d="M10.41 10.41a2 2 0 1 1-2.83-2.83"></path><line x1="13.5" y1="6.5" x2="17.5" y2="10.5"></line><path d="M6 21l3-3"></path><path d="M21 6l-3 3"></path><circle cx="12" cy="12" r="10"></circle></svg></div>';
-                                }}
-                              />
-                            </div>
+                        <div style={{
+                          width: '120px',
+                          height: '90px',
+                          borderRadius: 'var(--radius-md)',
+                          overflow: 'hidden',
+                          border: '1px solid var(--color-border)',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          background: 'var(--color-bg-tertiary)',
+                          color: 'var(--color-text-muted)',
+                        }}>
+                          {showImage ? (
+                            <img
+                              src={imagePath}
+                              alt={checkpointLabel || 'Checkpoint'}
+                              style={{
+                                width: '100%',
+                                height: '100%',
+                                objectFit: 'contain',
+                                padding: '4px',
+                                display: 'block',
+                              }}
+                              onError={() => {
+                                setFailedCheckpointImages((prev) => {
+                                  const next = new Set(prev);
+                                  next.add(rowKey);
+                                  return next;
+                                });
+                              }}
+                            />
                           ) : (
-                            <div style={{
-                              width: '80px',
-                              height: '60px',
-                              borderRadius: 'var(--radius-md)',
-                              display: 'flex',
-                              alignItems: 'center',
-                              justifyContent: 'center',
-                              background: 'var(--color-bg-tertiary)',
-                              color: 'var(--color-text-muted)',
-                            }}>
-                              <ImageOff size={20} />
-                            </div>
-                          );
-                        })()}
+                            <ImageOff size={20} aria-hidden />
+                          )}
+                        </div>
                       </td>
                       <td>{row.timing || '—'}</td>
                       <td style={{ textAlign: 'center' }}>
@@ -355,7 +325,8 @@ export default function MachineChecklistFormPage() {
                         />
                       </td>
                     </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </div>

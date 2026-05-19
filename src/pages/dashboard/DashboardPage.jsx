@@ -27,7 +27,6 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState({
     machines: [],
-    myMachines: [],
     workOrders: [],
     activeBreakdowns: [],
     rejections: [],
@@ -35,9 +34,8 @@ export default function DashboardPage() {
 
   const fetchDashboardData = async () => {
     try {
-      const [machinesRes, myMachinesRes, workOrdersRes, breakdownsRes, rejectionsRes] = await Promise.allSettled([
+      const [machinesRes, workOrdersRes, breakdownsRes, rejectionsRes] = await Promise.allSettled([
         machineApi.getAll(),
-        operatorApi.getMyMachines(),
         workOrderApi.getAll(),
         operatorApi.getActiveBreakdowns(),
         operatorApi.getAllRejections(),
@@ -45,7 +43,6 @@ export default function DashboardPage() {
 
       setStats({
         machines: machinesRes.status === 'fulfilled' ? (machinesRes.value.data.data || machinesRes.value.data || []) : [],
-        myMachines: myMachinesRes.status === 'fulfilled' ? (myMachinesRes.value.data.data || myMachinesRes.value.data || []) : [],
         workOrders: workOrdersRes.status === 'fulfilled' ? (workOrdersRes.value.data.data || workOrdersRes.value.data || []) : [],
         activeBreakdowns: breakdownsRes.status === 'fulfilled' ? (breakdownsRes.value.data.data || breakdownsRes.value.data || []) : [],
         rejections: rejectionsRes.status === 'fulfilled' ? (rejectionsRes.value.data.data || rejectionsRes.value.data || []) : [],
@@ -77,11 +74,9 @@ export default function DashboardPage() {
 
   const allMachines = Array.isArray(stats.machines) ? stats.machines : [];
   const runningMachines = allMachines.filter((m) => m.status === 'RUNNING');
-  const maintenanceMachines = allMachines.filter((m) => m.status === 'MAINTENANCE');
   const allWorkOrders = Array.isArray(stats.workOrders) ? stats.workOrders : [];
   const activeBreakdowns = Array.isArray(stats.activeBreakdowns) ? stats.activeBreakdowns : [];
   const allRejections = Array.isArray(stats.rejections) ? stats.rejections : [];
-  const myMachines = Array.isArray(stats.myMachines) ? stats.myMachines : [];
 
   return (
     <div className="page-container">
@@ -146,44 +141,6 @@ export default function DashboardPage() {
       </div>
 
       <div className="dashboard-grid">
-        {/* My Assigned Machines */}
-        <div className="card dashboard-section">
-          <div className="card-header">
-            <h2 className="card-title">My Machines</h2>
-            <button className="btn btn-ghost btn-sm" onClick={() => navigate('/assignments')}>
-              View All <ArrowRight size={14} />
-            </button>
-          </div>
-          {myMachines.length === 0 ? (
-            <div className="dashboard-empty">
-              <Monitor size={32} style={{ color: 'var(--color-text-muted)', opacity: 0.4 }} />
-              <p>No machines assigned yet</p>
-            </div>
-          ) : (
-            <div className="dashboard-list">
-              {myMachines.slice(0, 5).map((machine, idx) => {
-                // Resolve counts from allMachines data
-                const fullMachine = allMachines.find((am) => am.machine_id === machine.machine_id);
-                const run = fullMachine?.current_run || machine?.current_run;
-                const prodCount = run?.total_count ?? machine?.production_count ?? fullMachine?.production_count ?? 0;
-                const rejCount = run?.rejected_count ?? Number(machine?.total_rejected ?? fullMachine?.total_rejected ?? 0);
-
-                return (
-                  <div key={machine.machine_id || idx} className="dashboard-list-item" onClick={() => navigate(`/machines/${machine.machine_id}`)}>
-                    <div className="dashboard-list-info">
-                      <span className="dashboard-list-name">{machine.machine_name}</span>
-                      <span className="dashboard-list-id">
-                        {machine.machine_id} · Prod: {prodCount}{rejCount > 0 ? ` · Rej: ${rejCount}` : ''}
-                      </span>
-                    </div>
-                    <StatusBadge status={machine.status} />
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
-
         {/* Active Breakdowns */}
         <div className="card dashboard-section">
           <div className="card-header">
@@ -232,7 +189,7 @@ export default function DashboardPage() {
                   <div className="dashboard-list-info">
                     <span className="dashboard-list-name">{wo.work_order_name}</span>
                     <span className="dashboard-list-id">
-                      Target: {wo.target} | Progress: {calcPercentage(wo.produced_count || 0, wo.target)}%
+                      Target: {wo.target} | Progress: {calcPercentage(wo.total_produced || wo.produced_count || 0, wo.target)}%
                     </span>
                   </div>
                   <StatusBadge status={wo.status} />

@@ -12,11 +12,9 @@ import ConfirmModal from '../../components/common/ConfirmModal';
 import { getErrorMessage, formatDate, formatDateTime, calcPercentage, bufferToImageUrl } from '../../utils/helpers';
 import {
   ArrowLeft, Target, Hash, CheckCircle, Circle, PlayCircle, SkipForward, RefreshCw,
-  Plus, X, Search, Monitor, Trash2, Edit3, Save, AlertTriangle, Zap, Clock, Play, Pause, Image as ImageIcon, TrendingUp
+  Plus, X, Search, Monitor, Trash2, AlertTriangle, Zap, Clock, Play, Pause, Image as ImageIcon, TrendingUp
 } from 'lucide-react';
 import toast from 'react-hot-toast';
-
-const STEP_STATUSES = ['PENDING', 'IN_PROGRESS', 'COMPLETED', 'SKIPPED'];
 
 // Operator-level work order statuses
 const WO_STATUSES = [
@@ -36,7 +34,6 @@ export default function WorkOrderDetailPage() {
   const [rejections, setRejections] = useState([]);
   const [productionCounts, setProductionCounts] = useState({});
   const [woMetrics, setWoMetrics] = useState(null);
-  const [updatingStep, setUpdatingStep] = useState({});
   const [updatingWoStatus, setUpdatingWoStatus] = useState(false);
 
   // Machine assignment state
@@ -49,21 +46,6 @@ export default function WorkOrderDetailPage() {
   const [showUnassignModal, setShowUnassignModal] = useState(false);
   const [unassignMachineId, setUnassignMachineId] = useState('');
   const [unassigning, setUnassigning] = useState(false);
-
-  // Workflow add state
-  const [showAddStepModal, setShowAddStepModal] = useState(false);
-  const [addingStep, setAddingStep] = useState(false);
-  const [newStep, setNewStep] = useState({ step_order: 1, step_name: '', step_description: '', assigned_machine_id: '' });
-
-  // Edit step state
-  const [editingStepId, setEditingStepId] = useState(null);
-  const [editStepData, setEditStepData] = useState({});
-  const [savingStep, setSavingStep] = useState(false);
-
-  // Delete step state
-  const [showDeleteStepModal, setShowDeleteStepModal] = useState(false);
-  const [deleteStepId, setDeleteStepId] = useState(null);
-  const [deletingStep, setDeletingStep] = useState(false);
 
   // Report rejection state
   const [showRejectModal, setShowRejectModal] = useState(false);
@@ -196,16 +178,23 @@ export default function WorkOrderDetailPage() {
   }, [fetchData]);
 
   useEffect(() => {
+    const onMachineAssignChange = (payload) => {
+      if (!payload?.work_order_id || payload.work_order_id !== workOrderId) return;
+      fetchData();
+    };
     const unsubs = [
       subscribe('workflow:step_updated', fetchData),
       subscribe('workflow:step_added', fetchData),
+      subscribe('workflow:step_deleted', fetchData),
       subscribe('workorder:updated', fetchData),
+      subscribe('workorder:machine_assigned', onMachineAssignChange),
+      subscribe('workorder:machine_unassigned', onMachineAssignChange),
       subscribe('machine:update', fetchData),
       subscribe('machine:status_changed', fetchData),
       subscribe('rejection:reported', fetchData),
     ];
     return () => unsubs.forEach((u) => u?.());
-  }, [subscribe, fetchData]);
+  }, [subscribe, fetchData, workOrderId]);
 
   // Build a lookup map: machine_id -> ingest_path from allMachines
   const ingestPathMap = useMemo(() => {
@@ -319,79 +308,6 @@ export default function WorkOrderDetailPage() {
     }
   };
 
-  // --- Workflow Handlers ---
-  const handleStepStatusUpdate = async (stepId, newStatus) => {
-    setUpdatingStep((prev) => ({ ...prev, [stepId]: true }));
-    try {
-      await workflowApi.updateStepStatus(stepId, newStatus);
-      toast.success(`Step updated to ${newStatus.replace(/_/g, ' ')}`);
-      fetchData();
-    } catch (err) {
-      toast.error(getErrorMessage(err));
-    } finally {
-      setUpdatingStep((prev) => ({ ...prev, [stepId]: false }));
-    }
-  };
-
-  const handleAddStep = async (e) => {
-    e.preventDefault();
-    if (!newStep.step_name) {
-      toast.error('Please enter step name');
-      return;
-    }
-    setAddingStep(true);
-    try {
-      const stepData = { ...newStep };
-      if (!stepData.assigned_machine_id) delete stepData.assigned_machine_id;
-      await workflowApi.addStep(workOrderId, stepData);
-      toast.success('Workflow step added!');
-      setShowAddStepModal(false);
-      setNewStep({ step_order: steps.length + 2, step_name: '', step_description: '', assigned_machine_id: '' });
-      fetchData();
-    } catch (err) {
-      toast.error(getErrorMessage(err));
-    } finally {
-      setAddingStep(false);
-    }
-  };
-
-  const handleEditStep = (step) => {
-    setEditingStepId(step.id);
-    setEditStepData({
-      step_name: step.step_name,
-      step_description: step.step_description || '',
-    });
-  };
-
-  const handleSaveStep = async (stepId) => {
-    setSavingStep(true);
-    try {
-      await workflowApi.updateStep(stepId, editStepData);
-      toast.success('Step updated!');
-      setEditingStepId(null);
-      fetchData();
-    } catch (err) {
-      toast.error(getErrorMessage(err));
-    } finally {
-      setSavingStep(false);
-    }
-  };
-
-  const handleDeleteStep = async () => {
-    setDeletingStep(true);
-    try {
-      await workflowApi.deleteStep(deleteStepId);
-      toast.success('Step deleted');
-      setShowDeleteStepModal(false);
-      setDeleteStepId(null);
-      fetchData();
-    } catch (err) {
-      toast.error(getErrorMessage(err));
-    } finally {
-      setDeletingStep(false);
-    }
-  };
-
   // --- Production Tracking (uses ingest_path, NOT machine_id) ---
   // Only allowed when machine status is RUNNING
   const handleIngest = async (machine) => {
@@ -425,6 +341,7 @@ export default function WorkOrderDetailPage() {
   const targetForProgress = woMetrics?.target ?? workOrder.target ?? 0;
   const progress = calcPercentage(producedForProgress, targetForProgress);
   const steps = workflow?.steps || workflow?.workflow_steps || [];
+  const statusControlsLocked = workOrder.status === 'COMPLETED' || (targetForProgress > 0 && progress >= 100);
   // total_rejected comes from the work_order object in the rejections API response
   const totalRejections = woMetrics?.rejected ?? workOrder.total_rejected ?? (Array.isArray(rejections) ? rejections.reduce((sum, r) => sum + (Number(r.total_rejected) || r.rejected_count || 0), 0) : 0);
   const totalAccepted = woMetrics?.accepted ?? Math.max(0, producedForProgress - totalRejections);
@@ -475,7 +392,7 @@ export default function WorkOrderDetailPage() {
                 key={wo.value}
                 className={`btn btn-sm ${isActive ? 'btn-primary' : 'btn-secondary'}`}
                 onClick={() => handleWoStatusUpdate(wo.value)}
-                disabled={isActive || updatingWoStatus}
+                disabled={isActive || updatingWoStatus || statusControlsLocked}
                 style={{ minWidth: '120px' }}
               >
                 <wo.icon size={14} />
@@ -487,6 +404,11 @@ export default function WorkOrderDetailPage() {
         <p style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)', marginTop: 'var(--space-3)' }}>
           Current status: <strong style={{ color: 'var(--color-text-primary)' }}>{(workOrder.status || 'NOT SET').replace(/_/g, ' ')}</strong>
           {' · '}Only administrators can cancel or delete work orders.
+          {statusControlsLocked && (
+            <span style={{ display: 'block', marginTop: 'var(--space-2)', color: 'var(--color-success)' }}>
+              Production target reached — work order is completed. Status cannot be changed here.
+            </span>
+          )}
         </p>
       </div>
 
@@ -708,29 +630,20 @@ export default function WorkOrderDetailPage() {
         <div className="card">
           <div className="card-header">
             <h2 className="card-title">Workflow Steps</h2>
-            <button className="btn btn-primary btn-sm" onClick={() => {
-              setNewStep({ step_order: steps.length + 1, step_name: '', step_description: '', assigned_machine_id: '' });
-              setShowAddStepModal(true);
-            }}>
-              <Plus size={14} /> Add Step
-            </button>
+            <span style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)' }}>View only</span>
           </div>
 
           {!Array.isArray(steps) || steps.length === 0 ? (
             <div className="empty-state" style={{ padding: 'var(--space-8)' }}>
               <CheckCircle size={48} className="empty-state-icon" />
               <h3 className="empty-state-title">No workflow steps defined</h3>
-              <p className="empty-state-text">Add workflow steps to track the manufacturing process.</p>
-              <button className="btn btn-primary" style={{ marginTop: 'var(--space-4)' }} onClick={() => setShowAddStepModal(true)}>
-                <Plus size={16} /> Add First Step
-              </button>
+              <p className="empty-state-text">Steps for this work order will appear here when configured by an administrator.</p>
             </div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
               {steps.sort((a, b) => a.step_order - b.step_order).map((step) => {
                 const isCompleted = step.status === 'COMPLETED';
                 const isInProgress = step.status === 'IN_PROGRESS';
-                const isEditing = editingStepId === step.id;
 
                 return (
                   <div
@@ -755,79 +668,21 @@ export default function WorkOrderDetailPage() {
                     </div>
 
                     <div style={{ flex: 1, minWidth: 0 }}>
-                      {isEditing ? (
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
-                          <input
-                            type="text"
-                            value={editStepData.step_name}
-                            onChange={(e) => setEditStepData((p) => ({ ...p, step_name: e.target.value }))}
-                            placeholder="Step name"
-                            style={{ fontSize: 'var(--font-size-sm)' }}
-                          />
-                          <textarea
-                            value={editStepData.step_description}
-                            onChange={(e) => setEditStepData((p) => ({ ...p, step_description: e.target.value }))}
-                            placeholder="Step description"
-                            rows={2}
-                            style={{ fontSize: 'var(--font-size-xs)' }}
-                          />
-                          <div className="flex items-center gap-2">
-                            <button className="btn btn-primary btn-sm" onClick={() => handleSaveStep(step.id)} disabled={savingStep}>
-                              <Save size={12} /> {savingStep ? 'Saving...' : 'Save'}
-                            </button>
-                            <button className="btn btn-secondary btn-sm" onClick={() => setEditingStepId(null)}>
-                              Cancel
-                            </button>
-                          </div>
-                        </div>
-                      ) : (
-                        <>
-                          <div className="flex items-center justify-between" style={{ marginBottom: '4px' }}>
-                            <span style={{ fontWeight: 600, color: 'var(--color-text-primary)', fontSize: 'var(--font-size-sm)' }}>
-                              {step.step_name}
-                            </span>
-                            <div className="flex items-center gap-2">
-                              <StatusBadge status={step.status} />
-                              <button className="btn btn-ghost btn-sm" style={{ padding: '4px' }} onClick={() => handleEditStep(step)} title="Edit step">
-                                <Edit3 size={13} />
-                              </button>
-                              <button
-                                className="btn btn-ghost btn-sm" style={{ padding: '4px', color: 'var(--color-danger)' }}
-                                onClick={() => { setDeleteStepId(step.id); setShowDeleteStepModal(true); }}
-                                title="Delete step"
-                              >
-                                <Trash2 size={13} />
-                              </button>
-                            </div>
-                          </div>
-                          {step.step_description && (
-                            <p style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)', marginBottom: 'var(--space-2)' }}>
-                              {step.step_description}
-                            </p>
-                          )}
-                          {step.assigned_machine_id && (
-                            <span style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-accent-primary)' }}>
-                              Machine: {step.assigned_machine_id}
-                            </span>
-                          )}
-
-                          {/* Status update buttons */}
-                          <div style={{ display: 'flex', gap: 'var(--space-2)', marginTop: 'var(--space-3)', flexWrap: 'wrap' }}>
-                            {STEP_STATUSES.filter((s) => s !== step.status).map((s) => (
-                              <button
-                                key={s}
-                                className={`btn btn-sm ${s === 'COMPLETED' ? 'btn-success' : s === 'IN_PROGRESS' ? 'btn-primary' : 'btn-secondary'}`}
-                                onClick={() => handleStepStatusUpdate(step.id, s)}
-                                disabled={updatingStep[step.id]}
-                                style={{ fontSize: '11px' }}
-                              >
-                                {s === 'COMPLETED' && <CheckCircle size={12} />}
-                                {s === 'IN_PROGRESS' && <PlayCircle size={12} />}
-                                {s.replace(/_/g, ' ')}
-                              </button>
-                            ))}
-                          </div>
-                        </>
+                      <div className="flex items-center justify-between" style={{ marginBottom: '4px' }}>
+                        <span style={{ fontWeight: 600, color: 'var(--color-text-primary)', fontSize: 'var(--font-size-sm)' }}>
+                          {step.step_name}
+                        </span>
+                        <StatusBadge status={step.status} />
+                      </div>
+                      {step.step_description && (
+                        <p style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)', marginBottom: 'var(--space-2)' }}>
+                          {step.step_description}
+                        </p>
+                      )}
+                      {step.assigned_machine_id && (
+                        <span style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-accent-primary)' }}>
+                          Machine: {step.assigned_machine_id}
+                        </span>
                       )}
                     </div>
                   </div>
@@ -1075,76 +930,6 @@ export default function WorkOrderDetailPage() {
         </div>
       )}
 
-      {/* ==================== ADD WORKFLOW STEP MODAL ==================== */}
-      {showAddStepModal && (
-        <div className="modal-overlay" onClick={() => setShowAddStepModal(false)}>
-          <div className="modal" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header">
-              <h3 className="modal-title">Add Workflow Step</h3>
-              <button className="btn btn-ghost btn-icon" onClick={() => setShowAddStepModal(false)}>
-                <X size={18} />
-              </button>
-            </div>
-            <form onSubmit={handleAddStep}>
-              <div className="form-group">
-                <label htmlFor="step-order">Step Order</label>
-                <input
-                  id="step-order"
-                  type="number"
-                  min="1"
-                  value={newStep.step_order}
-                  onChange={(e) => setNewStep((p) => ({ ...p, step_order: parseInt(e.target.value) || 1 }))}
-                />
-              </div>
-              <div className="form-group">
-                <label htmlFor="step-name">Step Name *</label>
-                <input
-                  id="step-name"
-                  type="text"
-                  placeholder="e.g., Raw Material Procurement"
-                  value={newStep.step_name}
-                  onChange={(e) => setNewStep((p) => ({ ...p, step_name: e.target.value }))}
-                  required
-                />
-              </div>
-              <div className="form-group">
-                <label htmlFor="step-desc">Description</label>
-                <textarea
-                  id="step-desc"
-                  rows={3}
-                  placeholder="Describe what this step involves..."
-                  value={newStep.step_description}
-                  onChange={(e) => setNewStep((p) => ({ ...p, step_description: e.target.value }))}
-                />
-              </div>
-              <div className="form-group">
-                <label htmlFor="step-machine">Assigned Machine (Optional)</label>
-                <select
-                  id="step-machine"
-                  value={newStep.assigned_machine_id}
-                  onChange={(e) => setNewStep((p) => ({ ...p, assigned_machine_id: e.target.value }))}
-                >
-                  <option value="">No machine assigned</option>
-                  {machines.map((m) => (
-                    <option key={m.machine_id} value={m.machine_id}>
-                      {m.machine_name} ({m.machine_id})
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div className="modal-footer">
-                <button type="button" className="btn btn-secondary" onClick={() => setShowAddStepModal(false)}>
-                  Cancel
-                </button>
-                <button type="submit" className="btn btn-primary" disabled={addingStep}>
-                  <Plus size={16} /> {addingStep ? 'Adding...' : 'Add Step'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
       {/* Unassign Machine Confirmation */}
       <ConfirmModal
         isOpen={showUnassignModal}
@@ -1248,17 +1033,6 @@ export default function WorkOrderDetailPage() {
         </div>
       )}
 
-      {/* Delete Step Confirmation */}
-      <ConfirmModal
-        isOpen={showDeleteStepModal}
-        onClose={() => setShowDeleteStepModal(false)}
-        onConfirm={handleDeleteStep}
-        title="Delete Workflow Step"
-        message="Are you sure you want to delete this workflow step? This action cannot be undone."
-        confirmText="Delete"
-        variant="danger"
-        loading={deletingStep}
-      />
     </div>
   );
 }

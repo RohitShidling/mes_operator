@@ -91,6 +91,7 @@ export default function MachineChecklistPage() {
     const unsubs = [
       subscribe('machine:status_changed', fetchChecklist),
       subscribe('machine:update', fetchChecklist),
+      subscribe('machine:deleted', fetchChecklist),
     ];
     return () => unsubs.forEach((u) => u?.());
   }, [subscribe]);
@@ -142,26 +143,15 @@ export default function MachineChecklistPage() {
   };
 
   const handleDeleteMachine = async (machineId, machineName) => {
-    const confirmed = window.confirm(`Delete machine assignment for ${machineName || machineId}?`);
+    const confirmed = window.confirm(
+      `Permanently delete machine "${machineName || machineId}" from the system? This cannot be undone.`
+    );
     if (!confirmed) return;
 
     setUpdating((prev) => ({ ...prev, [machineId]: true }));
     try {
-      try {
-        await operatorApi.removeMyMachine(machineId);
-      } catch (primaryErr) {
-        const status = primaryErr?.response?.status;
-        const message = String(primaryErr?.response?.data?.message || '').toLowerCase();
-        const isRouteMissing = status === 404 && message.includes('route');
-
-        if (isRouteMissing) {
-          await operatorApi.unassignFromMachine(machineId);
-        } else {
-          throw primaryErr;
-        }
-      }
-
-      toast.success(`Machine removed: ${machineName || machineId}`);
+      await machineApi.delete(machineId);
+      toast.success('Machine deleted');
       fetchChecklist();
     } catch (err) {
       toast.error(getErrorMessage(err));
@@ -313,6 +303,14 @@ export default function MachineChecklistPage() {
                       {rejectionCount}
                     </span>
                   </div>
+                  <div className="checklist-stat">
+                    <span className="checklist-stat-label">Checklist</span>
+                    <span className="checklist-stat-value" style={{ fontSize: 'var(--font-size-sm)' }}>
+                      {(machine.checklist_total_items ?? 0) > 0
+                        ? `${machine.checklist_completed_items ?? 0}/${machine.checklist_total_items}`
+                        : '—'}
+                    </span>
+                  </div>
                   <div className="checklist-stat" style={{ marginLeft: 'auto' }}>
                     <button
                       className="btn btn-success btn-sm"
@@ -326,6 +324,20 @@ export default function MachineChecklistPage() {
                     </button>
                   </div>
                 </div>
+
+                {(machine.checklist_total_items ?? 0) > 0 && (
+                  <div style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 'var(--space-2)',
+                    marginBottom: 'var(--space-3)',
+                    flexWrap: 'wrap',
+                  }}
+                  >
+                    <span style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)' }}>Daily checklist</span>
+                    <StatusBadge status={machine.checklist_status || 'NOT_STARTED'} />
+                  </div>
+                )}
 
                 {/* Status Actions */}
                 <div className="checklist-actions">
@@ -353,7 +365,7 @@ export default function MachineChecklistPage() {
                   className="btn btn-danger btn-sm w-full mt-2"
                   onClick={() => handleDeleteMachine(machine.machine_id, machine.machine_name)}
                   disabled={updating[machine.machine_id]}
-                  title="Delete machine assignment"
+                  title="Permanently delete this machine"
                 >
                   <Trash2 size={14} />
                   {updating[machine.machine_id] ? 'Deleting...' : 'Delete'}

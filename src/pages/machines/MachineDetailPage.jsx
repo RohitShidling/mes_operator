@@ -86,14 +86,21 @@ export default function MachineDetailPage() {
     const onRejectionEvent = (payload) => {
       if (!payload?.machine_id || payload.machine_id === machineId) fetchData();
     };
+    const onMachineDeleted = (payload) => {
+      if (payload?.machine_id === machineId) {
+        toast.success('This machine was removed from the system');
+        navigate('/machines');
+      }
+    };
     const unsubs = [
       subscribe('machine:update', fetchData),
       subscribe('machine:status_changed', fetchData),
+      subscribe('machine:deleted', onMachineDeleted),
       subscribe('rejection:reported', onRejectionEvent),
       subscribe('rejection:updated', onRejectionEvent),
     ];
     return () => unsubs.forEach((u) => u?.());
-  }, [subscribe, machineId]);
+  }, [subscribe, machineId, navigate]);
 
   const handleStatusChange = async (newStatus) => {
     setUpdating(true);
